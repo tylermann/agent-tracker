@@ -1,0 +1,66 @@
+import XCTest
+
+@testable import AgentTrackerCore
+
+final class EventMapperTests: XCTestCase {
+  func testCodexPromptMapsToWorkingEvent() throws {
+    let payload = Data(
+      #"{"session_id":"codex-1","cwd":"/tmp/project","prompt":"  Fix   the\nlogin flow  "}"#.utf8)
+    let event = try XCTUnwrap(
+      EventMapper.map(
+        harness: .codex,
+        eventName: "UserPromptSubmit",
+        payloadData: payload,
+        environment: [
+          "AGENT_TRACKER_RUN_ID": "run-1",
+          "AGENT_TRACKER_TERMINAL_ID": "terminal-1",
+        ]
+      ))
+    XCTAssertEqual(event.kind, .promptSubmitted)
+    XCTAssertEqual(event.runID, "run-1")
+    XCTAssertEqual(event.harnessSessionID, "codex-1")
+    XCTAssertEqual(event.ghosttyTerminalID, "terminal-1")
+    XCTAssertEqual(event.promptPreview, "Fix the login flow")
+  }
+
+  func testClaudePermissionNotificationNeedsAttention() throws {
+    let payload = Data(#"{"session_id":"claude-1","notification_type":"permission_prompt"}"#.utf8)
+    let event = try XCTUnwrap(
+      EventMapper.map(
+        harness: .claude,
+        eventName: "Notification",
+        payloadData: payload,
+        environment: ["AGENT_TRACKER_RUN_ID": "run-2"]
+      ))
+    XCTAssertEqual(event.kind, .attentionRequired)
+  }
+
+  func testNonAttentionClaudeNotificationIsIgnored() throws {
+    let payload = Data(#"{"notification_type":"auth_success"}"#.utf8)
+    XCTAssertNil(
+      try EventMapper.map(
+        harness: .claude,
+        eventName: "Notification",
+        payloadData: payload,
+        environment: [:]
+      ))
+  }
+
+  func testInputToolNeedsAttention() throws {
+    let payload = Data(#"{"tool_name":"request_user_input"}"#.utf8)
+    let event = try XCTUnwrap(
+      EventMapper.map(
+        harness: .cursor,
+        eventName: "preToolUse",
+        payloadData: payload,
+        environment: ["AGENT_TRACKER_RUN_ID": "run-3"]
+      ))
+    XCTAssertEqual(event.kind, .attentionRequired)
+  }
+
+  func testPromptPreviewIsBounded() {
+    let preview = EventMapper.promptPreview(String(repeating: "word ", count: 40))
+    XCTAssertEqual(preview.count, 120)
+    XCTAssertTrue(preview.hasSuffix("…"))
+  }
+}

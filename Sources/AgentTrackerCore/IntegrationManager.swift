@@ -1,0 +1,369 @@
+import Foundation
+
+public struct IntegrationReport: Sendable {
+  public var lines: [String]
+  public var success: Bool
+
+  public init(lines: [String] = [], success: Bool = true) {
+    self.lines = lines
+    self.success = success
+  }
+
+  public var text: String { lines.joined(separator: "\n") }
+}
+
+public final class IntegrationManager: @unchecked Sendable {
+  public let home: URL
+  private let fileManager: FileManager
+  private let marker = "--source agent-tracker"
+
+  public init(
+    home: URL = FileManager.default.homeDirectoryForCurrentUser, fileManager: FileManager = .default
+  ) {
+    self.home = home
+    self.fileManager = fileManager
+  }
+
+  public func install(helperPath: String) throws -> IntegrationReport {
+    var report = IntegrationReport()
+    let executables = resolveHarnessExecutables()
+    let missing = Harness.allCases.filter { executables[$0] == nil }
+    for harness in missing {
+      report.lines.append(
+        "Warning: could not locate \(harness.displayName); its wrapper was not installed.")
+    }
+
+    try installShellWrappers(helperPath: helperPath, executables: executables)
+    report.lines.append("Installed managed zsh wrappers.")
+    try mergeClaudeHooks(helperPath: helperPath)
+    report.lines.append("Installed Claude lifecycle hooks.")
+    try mergeCodexHooks(helperPath: helperPath)
+    report.lines.append("Installed Codex lifecycle hooks without changing config.toml or notify.")
+    try mergeCursorHooks(helperPath: helperPath)
+    report.lines.append("Installed Cursor lifecycle hooks.")
+    report.lines.append("Open a new shell or run: source ~/.zshrc")
+    return report
+  }
+
+  public func uninstall() throws -> IntegrationReport {
+    var report = IntegrationReport()
+    try removeShellWrappers()
+    report.lines.append("Removed managed zsh wrappers.")
+    try removeClaudeHooks()
+    report.lines.append("Removed Agent Tracker Claude hooks.")
+    try removeCodexHooks()
+    report.lines.append("Removed Agent Tracker Codex hooks.")
+    try removeCursorHooks()
+    report.lines.append("Removed Agent Tracker Cursor hooks.")
+    return report
+  }
+
+  public func doctor(helperPath: String? = nil) -> IntegrationReport {
+    var lines: [String] = []
+    var success = true
+    if FileManager.default.fileExists(atPath: "/Applications/Ghostty.app") {
+      lines.append("✓ Ghostty is installed")
+    } else {
+      lines.append("✗ Ghostty was not found in /Applications")
+      success = false
+    }
+    if let version = GhosttyAutomation.ghosttyVersion() {
+      lines.append("✓ Ghostty AppleScript responded (\(version))")
+    } else {
+      lines.append("! Ghostty AppleScript is unavailable or permission has not been granted")
+    }
+    for harness in Harness.allCases {
+      if let path = resolveHarnessExecutables()[harness] {
+        lines.append("✓ \(harness.displayName): \(path)")
+      } else {
+        lines.append("✗ \(harness.displayName) executable not found")
+        success = false
+      }
+    }
+    if let helperPath {
+      let exists = fileManager.isExecutableFile(atPath: helperPath)
+      lines.append("\(exists ? "✓" : "✗") Helper: \(helperPath)")
+      success = success && exists
+    }
+    let shellFile = home.appendingPathComponent(".config/agent-tracker/shell.zsh")
+    lines.append("\(fileManager.fileExists(atPath: shellFile.path) ? "✓" : "!") Shell integration")
+    lines.append("Data stays local in ~/Library/Application Support/AgentTracker")
+    return IntegrationReport(lines: lines, success: success)
+  }
+
+  public func resolveHarnessExecutables() -> [Harness: String] {
+    Dictionary(
+      uniqueKeysWithValues: Harness.allCases.compactMap { harness in
+        resolveExecutable(named: harness == .cursor ? "agent" : harness.rawValue)
+          .map { (harness, $0) }
+      })
+  }
+
+  private func resolveExecutable(named name: String) -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+    process.arguments = ["-lic", "whence -p \(shellQuote(name))"]
+    let output = Pipe()
+    process.standardOutput = output
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+      process.waitUntilExit()
+      let lines =
+        String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+        .components(separatedBy: .newlines) ?? []
+      return lines.reversed().first {
+        $0.hasPrefix("/") && fileManager.isExecutableFile(atPath: $0)
+      }
+    } catch {
+      return nil
+    }
+  }
+
+  private func installShellWrappers(helperPath: String, executables: [Harness: String]) throws {
+    let directory = home.appendingPathComponent(".config/agent-tracker", isDirectory: true)
+    try fileManager.createDirectory(
+      at: directory,
+      withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700]
+    )
+    let wrapperFile = directory.appendingPathComponent("shell.zsh")
+    var contents =
+      "# Generated by Agent Tracker. Use the app or `agent-tracker uninstall-integrations` to remove.\n"
+    for harness in Harness.allCases {
+      guard let executable = executables[harness] else { continue }
+      let names = harness == .cursor ? ["agent", "cursor-agent"] : [harness.rawValue]
+      for name in names {
+        contents += """
+          if (( ! $+aliases[\(name)] && ! $+functions[\(name)] )); then
+            function \(name) { \(shellQuote(helperPath)) wrap --harness \(harness.rawValue) -- \(shellQuote(executable)) "$@"; }
+          fi
+          """ + "\n"
+      }
+    }
+    try atomicWrite(Data(contents.utf8), to: wrapperFile, permissions: 0o600, backup: true)
+
+    let zshrc = home.appendingPathComponent(".zshrc")
+    let current = (try? String(contentsOf: zshrc, encoding: .utf8)) ?? ""
+    let begin = "# >>> agent-tracker >>>"
+    let end = "# <<< agent-tracker <<<"
+    let block = """
+      \(begin)
+      [[ -f "$HOME/.config/agent-tracker/shell.zsh" ]] && source "$HOME/.config/agent-tracker/shell.zsh"
+      \(end)
+      """
+    let cleaned = removeMarkedBlock(from: current, begin: begin, end: end)
+      .trimmingCharacters(in: .newlines)
+    let updated = cleaned.isEmpty ? block + "\n" : cleaned + "\n\n" + block + "\n"
+    try atomicWrite(Data(updated.utf8), to: zshrc, permissions: nil, backup: true)
+  }
+
+  private func removeShellWrappers() throws {
+    let zshrc = home.appendingPathComponent(".zshrc")
+    if let current = try? String(contentsOf: zshrc, encoding: .utf8) {
+      let updated = removeMarkedBlock(
+        from: current,
+        begin: "# >>> agent-tracker >>>",
+        end: "# <<< agent-tracker <<<"
+      )
+      try atomicWrite(Data(updated.utf8), to: zshrc, permissions: nil, backup: false)
+    }
+    let wrapperFile = home.appendingPathComponent(".config/agent-tracker/shell.zsh")
+    if fileManager.fileExists(atPath: wrapperFile.path) {
+      try fileManager.removeItem(at: wrapperFile)
+    }
+  }
+
+  private func hookCommand(helperPath: String, harness: Harness, event: String) -> String {
+    "\(shellQuote(helperPath)) event --source agent-tracker --harness \(harness.rawValue) --event \(event)"
+  }
+
+  private func mergeClaudeHooks(helperPath: String) throws {
+    let url = home.appendingPathComponent(".claude/settings.json")
+    var root = try jsonObject(at: url)
+    var hooks = root["hooks"] as? [String: Any] ?? [:]
+    for event in [
+      "SessionStart", "UserPromptSubmit", "PermissionRequest", "Notification", "PreToolUse", "Stop",
+      "SessionEnd",
+    ] {
+      var entries = hooks[event] as? [[String: Any]] ?? []
+      guard !containsMarker(entries) else { continue }
+      entries.append([
+        "matcher": event == "PreToolUse" ? "AskQuestion|request_user_input" : "",
+        "hooks": [
+          [
+            "type": "command",
+            "command": hookCommand(helperPath: helperPath, harness: .claude, event: event),
+            "timeout": 5,
+          ]
+        ],
+      ])
+      hooks[event] = entries
+    }
+    root["hooks"] = hooks
+    try writeJSON(root, to: url)
+  }
+
+  private func mergeCodexHooks(helperPath: String) throws {
+    let url = home.appendingPathComponent(".codex/hooks.json")
+    var root = try jsonObject(at: url)
+    var hooks = root["hooks"] as? [String: Any] ?? [:]
+    for event in [
+      "SessionStart", "UserPromptSubmit", "PermissionRequest", "PreToolUse", "Stop", "SessionEnd",
+    ] {
+      var entries = hooks[event] as? [[String: Any]] ?? []
+      guard !containsMarker(entries) else { continue }
+      entries.append([
+        "matcher": event == "PreToolUse" ? "request_user_input" : "",
+        "hooks": [
+          [
+            "type": "command",
+            "command": hookCommand(helperPath: helperPath, harness: .codex, event: event),
+            "timeout": 5,
+          ]
+        ],
+      ])
+      hooks[event] = entries
+    }
+    root["hooks"] = hooks
+    try writeJSON(root, to: url)
+  }
+
+  private func mergeCursorHooks(helperPath: String) throws {
+    let url = home.appendingPathComponent(".cursor/hooks.json")
+    var root = try jsonObject(at: url)
+    root["version"] = root["version"] ?? 1
+    var hooks = root["hooks"] as? [String: Any] ?? [:]
+    for event in ["sessionStart", "beforeSubmitPrompt", "preToolUse", "stop", "sessionEnd"] {
+      var entries = hooks[event] as? [[String: Any]] ?? []
+      guard !containsMarker(entries) else { continue }
+      entries.append([
+        "command": hookCommand(helperPath: helperPath, harness: .cursor, event: event),
+        "timeout": 5,
+      ])
+      hooks[event] = entries
+    }
+    root["hooks"] = hooks
+    try writeJSON(root, to: url)
+  }
+
+  private func removeClaudeHooks() throws {
+    try removeNestedHooks(at: home.appendingPathComponent(".claude/settings.json"))
+  }
+
+  private func removeCodexHooks() throws {
+    try removeNestedHooks(at: home.appendingPathComponent(".codex/hooks.json"))
+  }
+
+  private func removeCursorHooks() throws {
+    let url = home.appendingPathComponent(".cursor/hooks.json")
+    guard fileManager.fileExists(atPath: url.path) else { return }
+    var root = try jsonObject(at: url)
+    guard var hooks = root["hooks"] as? [String: Any] else { return }
+    for (event, value) in hooks {
+      guard let entries = value as? [[String: Any]] else { continue }
+      let kept = entries.filter { !containsMarker($0) }
+      if kept.isEmpty { hooks.removeValue(forKey: event) } else { hooks[event] = kept }
+    }
+    root["hooks"] = hooks
+    try writeJSON(root, to: url, backup: false)
+  }
+
+  private func removeNestedHooks(at url: URL) throws {
+    guard fileManager.fileExists(atPath: url.path) else { return }
+    var root = try jsonObject(at: url)
+    guard var hooks = root["hooks"] as? [String: Any] else { return }
+    for (event, value) in hooks {
+      guard let entries = value as? [[String: Any]] else { continue }
+      var kept: [[String: Any]] = []
+      for var entry in entries {
+        guard let commands = entry["hooks"] as? [[String: Any]] else {
+          if !containsMarker(entry) { kept.append(entry) }
+          continue
+        }
+        let remaining = commands.filter { !containsMarker($0) }
+        if !remaining.isEmpty {
+          entry["hooks"] = remaining
+          kept.append(entry)
+        }
+      }
+      if kept.isEmpty { hooks.removeValue(forKey: event) } else { hooks[event] = kept }
+    }
+    root["hooks"] = hooks
+    try writeJSON(root, to: url, backup: false)
+  }
+
+  private func containsMarker(_ value: Any) -> Bool {
+    if let string = value as? String { return string.contains(marker) }
+    if let dictionary = value as? [String: Any] {
+      return dictionary.values.contains(where: containsMarker)
+    }
+    if let array = value as? [Any] { return array.contains(where: containsMarker) }
+    return false
+  }
+
+  private func jsonObject(at url: URL) throws -> [String: Any] {
+    guard fileManager.fileExists(atPath: url.path) else { return [:] }
+    let data = try Data(contentsOf: url)
+    guard !data.isEmpty else { return [:] }
+    return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+  }
+
+  private func writeJSON(_ object: [String: Any], to url: URL, backup: Bool = true) throws {
+    let data = try JSONSerialization.data(
+      withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+    var terminated = data
+    terminated.append(0x0A)
+    try atomicWrite(terminated, to: url, permissions: 0o600, backup: backup)
+  }
+
+  private func atomicWrite(_ data: Data, to url: URL, permissions: Int?, backup: Bool) throws {
+    try fileManager.createDirectory(
+      at: url.deletingLastPathComponent(),
+      withIntermediateDirectories: true,
+      attributes: nil
+    )
+    if backup, fileManager.fileExists(atPath: url.path) {
+      let formatter = DateFormatter()
+      formatter.dateFormat = "yyyyMMdd-HHmmss"
+      let backupURL = url.appendingPathExtension(
+        "agent-tracker-backup-\(formatter.string(from: Date()))")
+      if !fileManager.fileExists(atPath: backupURL.path) {
+        try fileManager.copyItem(at: url, to: backupURL)
+      }
+    }
+    let temporary = url.deletingLastPathComponent().appendingPathComponent(
+      ".\(url.lastPathComponent).\(UUID().uuidString).tmp")
+    let existingPermissions =
+      (try? fileManager.attributesOfItem(atPath: url.path)[.posixPermissions]) as? NSNumber
+    try data.write(to: temporary, options: .atomic)
+    if let permissions {
+      try fileManager.setAttributes([.posixPermissions: permissions], ofItemAtPath: temporary.path)
+    } else if let existingPermissions {
+      try fileManager.setAttributes(
+        [.posixPermissions: existingPermissions], ofItemAtPath: temporary.path)
+    }
+    if fileManager.fileExists(atPath: url.path) {
+      _ = try fileManager.replaceItemAt(url, withItemAt: temporary)
+    } else {
+      try fileManager.moveItem(at: temporary, to: url)
+    }
+  }
+
+  private func removeMarkedBlock(from source: String, begin: String, end: String) -> String {
+    guard let beginRange = source.range(of: begin),
+      let endRange = source.range(of: end, range: beginRange.upperBound..<source.endIndex)
+    else { return source }
+    var result = source
+    var removal = beginRange.lowerBound..<endRange.upperBound
+    if removal.upperBound < result.endIndex, result[removal.upperBound] == "\n" {
+      removal = removal.lowerBound..<result.index(after: removal.upperBound)
+    }
+    result.removeSubrange(removal)
+    return result
+  }
+
+  private func shellQuote(_ value: String) -> String {
+    "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+  }
+}
