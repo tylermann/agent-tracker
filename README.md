@@ -63,3 +63,7 @@ The generated zsh functions invoke `wrap` transparently under the familiar `clau
 - Local Ghostty sessions only; remote SSH agents and other terminal emulators are not yet mapped.
 - Monitoring and exact terminal focus only; the panel does not send prompts or terminate processes.
 - Cursor's hook surface can report fewer explicit permission states than Claude or Codex. Its completed-turn and activity states remain reliable, while some permission waits may appear as ordinary waiting.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
