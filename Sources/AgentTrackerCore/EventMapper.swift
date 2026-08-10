@@ -42,12 +42,16 @@ public enum EventMapper {
       if tool.contains("askquestion")
         || tool.contains("requestuserinput")
         || tool.contains("request_user_input")
+        || (harness == .cursor && cursorToolRequiresApproval(tool))
       {
         kind = .attentionRequired
       } else {
         kind = .activity
       }
-    case "posttooluse", "beforeshellexecution", "aftershellexecution", "afterfileedit":
+    case "beforeshellexecution", "beforemcpexecution":
+      kind = harness == .cursor ? .attentionRequired : .activity
+    case "posttooluse", "posttoolusefailure", "aftershellexecution", "aftermcpexecution",
+      "afterfileedit":
       kind = .activity
     case "stop":
       kind = .turnStopped
@@ -82,7 +86,10 @@ public enum EventMapper {
       harnessSessionID: sessionID,
       ghosttyTerminalID: environment["AGENT_TRACKER_TERMINAL_ID"],
       processID: int32(environment["AGENT_TRACKER_CHILD_PID"]),
-      cwd: string(in: payload, keys: ["cwd", "workspace_root", "workspaceRoot"])
+      cwd: string(
+        in: payload,
+        keys: ["cwd", "workspace_root", "workspaceRoot", "workspace_roots", "workspaceRoots"]
+      )
         ?? environment["PWD"],
       promptPreview: rawPrompt.map { promptPreview($0) },
       detail: detail
@@ -111,6 +118,11 @@ public enum EventMapper {
         if let string = dictionary[key] as? String, !string.isEmpty {
           return string
         }
+        if let strings = dictionary[key] as? [String],
+          let string = strings.first(where: { !$0.isEmpty })
+        {
+          return string
+        }
       }
       for nested in dictionary.values {
         if let match = string(in: nested, keys: keys) { return match }
@@ -126,5 +138,14 @@ public enum EventMapper {
   private static func int32(_ value: String?) -> Int32? {
     guard let value, let number = Int32(value) else { return nil }
     return number
+  }
+
+  private static func cursorToolRequiresApproval(_ tool: String) -> Bool {
+    let normalized = tool.replacingOccurrences(
+      of: "[^a-zA-Z]",
+      with: "",
+      options: .regularExpression
+    ).lowercased()
+    return normalized == "websearch" || normalized == "webfetch"
   }
 }

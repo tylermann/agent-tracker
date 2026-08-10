@@ -8,7 +8,8 @@ Agent Tracker is a small native macOS sidecar for monitoring Claude Code, Codex 
 - Tracks tabs, splits, and windows independently, including multiple agents in the same repository.
 - Uses each harness's lifecycle hooks instead of scraping terminal output.
 - Shows a menu-bar unread count and sends actionable macOS notifications.
-- Stores only local run metadata and a 120-character first-prompt preview; it stores no transcripts and uses no network service.
+- Stores only local run metadata and a 120-character first-prompt preview; it stores no transcripts.
+- Optionally shows compact remaining-usage meters for Claude, Codex, and Cursor by polling each provider with that product's existing local sign-in.
 - Installs and removes its hooks and zsh wrappers without replacing unrelated configuration.
 
 ## Build and run
@@ -34,6 +35,11 @@ On first launch:
 3. Choose **Install or Repair** to add lifecycle hooks and zsh wrappers.
 4. If Codex reports untrusted hooks, open `/hooks` once and approve the Agent Tracker entries.
 5. Start a new shell, or run `source ~/.zshrc`.
+
+Usage meters are off by default. Enable them in Settings to poll about every three minutes. The
+feature reuses local OAuth credentials and calls undocumented first-party usage endpoints; no extra
+API keys are needed, but providers may change these endpoints without notice. A failed refresh keeps
+the last good reading marked as stale, while signed-out providers show that status directly.
 
 The integration installer creates timestamped backups before changing existing configuration. It adds one marked block to `~/.zshrc`, writes a managed `~/.config/agent-tracker/shell.zsh`, and merges marked hook commands into the harness settings. Existing Codex `notify` configuration is not touched.
 
@@ -63,6 +69,7 @@ The generated zsh functions invoke `wrap` transparently under the familiar `clau
 - Local Ghostty sessions only; remote SSH agents and other terminal emulators are not yet mapped.
 - Monitoring and exact terminal focus only; the panel does not send prompts or terminate processes.
 - Cursor's hook surface can report fewer explicit permission states than Claude or Codex. Its completed-turn and activity states remain reliable, while some permission waits may appear as ordinary waiting.
+- Usage endpoints are unofficial/undocumented adapters. Meters degrade to logged-out, unavailable, or stale states when credentials or response formats change.
 
 ## License
 

@@ -69,14 +69,16 @@ final class RunStoreTests: XCTestCase {
       harness: .claude,
       kind: .sessionStarted,
       harnessSessionID: "session",
-      ghosttyTerminalID: "terminal"
+      ghosttyTerminalID: "terminal",
+      cwd: "/Users/example/.claude"
     )
     let cursor = AgentEvent(
       runID: "shared",
       harness: .cursor,
       kind: .promptSubmitted,
       harnessSessionID: "session",
-      ghosttyTerminalID: "terminal"
+      ghosttyTerminalID: "terminal",
+      cwd: "/Users/example/project"
     )
     var laterClaude = claude
     laterClaude.eventID = UUID()
@@ -88,7 +90,32 @@ final class RunStoreTests: XCTestCase {
     _ = try store.apply(laterClaude)
 
     XCTAssertEqual(try store.run(id: "shared")?.harness, .cursor)
-    XCTAssertEqual(try store.run(id: "shared")?.status, .waiting)
+    XCTAssertEqual(try store.run(id: "shared")?.workingDirectory, "/Users/example/project")
+    XCTAssertEqual(try store.run(id: "shared")?.status, .working)
+  }
+
+  func testClaudeCompatibilityActivityDoesNotClearCursorAttention() throws {
+    let cursor = AgentEvent(
+      runID: "shared",
+      harness: .cursor,
+      kind: .attentionRequired,
+      harnessSessionID: "session",
+      cwd: "/Users/example/project"
+    )
+    let compatibility = AgentEvent(
+      occurredAt: cursor.occurredAt.addingTimeInterval(1),
+      runID: "shared",
+      harness: .claude,
+      kind: .activity,
+      harnessSessionID: "session",
+      cwd: "/Users/example/.claude"
+    )
+
+    _ = try store.apply(cursor)
+    _ = try store.apply(compatibility)
+
+    XCTAssertEqual(try store.run(id: "shared")?.status, .needsAttention)
+    XCTAssertEqual(try store.run(id: "shared")?.workingDirectory, "/Users/example/project")
   }
 
   func testLegacyHarnessQualifiedOrphansAreMergedOnOpen() throws {

@@ -141,19 +141,25 @@ public final class RunStore: @unchecked Sendable {
 
   private func reduce(_ event: AgentEvent, into run: inout TrackedRun) {
     // Cursor emits both native and Claude Code-compatible hooks. Once a native Cursor event
-    // identifies the shared run, do not let a later compatibility event relabel it as Claude.
-    if run.harness != .cursor || event.harness == .cursor {
+    // identifies the shared run, do not let a later compatibility event relabel it as Claude or
+    // replace native metadata with the directory from which the compatibility hook was loaded.
+    let acceptsHarnessMetadata = run.harness != .cursor || event.harness == .cursor
+    if acceptsHarnessMetadata {
       run.harness = event.harness
+      run.workingDirectory = event.cwd ?? run.workingDirectory
     }
     run.harnessSessionID = event.harnessSessionID ?? run.harnessSessionID
     run.ghosttyTerminalID = event.ghosttyTerminalID ?? run.ghosttyTerminalID
     run.executable = event.executable ?? run.executable
     run.processID = event.processID ?? run.processID
-    run.workingDirectory = event.cwd ?? run.workingDirectory
     if run.promptPreview == nil, let preview = event.promptPreview, !preview.isEmpty {
       run.promptPreview = preview
     }
     run.lastEventAt = max(run.lastEventAt, event.occurredAt)
+
+    // The native event is authoritative for Cursor state. Its Claude-compatible duplicate may be
+    // delivered afterward and otherwise turn an approval wait back into ordinary activity.
+    guard acceptsHarnessMetadata else { return }
 
     switch event.kind {
     case .processStarted, .sessionStarted:

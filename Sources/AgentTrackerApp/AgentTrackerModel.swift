@@ -8,6 +8,13 @@ import Foundation
 final class AgentTrackerModel: ObservableObject {
   @Published private(set) var runs: [TrackedRun] = []
   @Published var errorMessage: String?
+  @Published private(set) var usageSnapshots: [ProviderUsageSnapshot] = []
+  @Published var usageMetersEnabled: Bool {
+    didSet {
+      UserDefaults.standard.set(usageMetersEnabled, forKey: "usageMetersEnabled")
+      configureUsagePolling()
+    }
+  }
   @Published var isDetached: Bool {
     didSet { UserDefaults.standard.set(isDetached, forKey: "panelDetached") }
   }
@@ -17,11 +24,15 @@ final class AgentTrackerModel: ObservableObject {
   private var inbox: EventInbox?
   private var store: RunStore?
   private var timer: Timer?
+  private var usageTask: Task<Void, Never>?
+  private var lastGoodUsage: [Harness: ProviderUsageSnapshot] = [:]
   private var distributedObserver: NSObjectProtocol?
   private var didReconcile = false
+  private var isStarted = false
 
   init() {
     isDetached = UserDefaults.standard.bool(forKey: "panelDetached")
+    usageMetersEnabled = UserDefaults.standard.bool(forKey: "usageMetersEnabled")
     do {
       inbox = try EventInbox()
       store = try RunStore()
@@ -39,6 +50,7 @@ final class AgentTrackerModel: ObservableObject {
   var recent: [TrackedRun] { runs.filter { $0.status == .ended || $0.status == .unavailable } }
 
   func start() {
+    isStarted = true
     distributedObserver = DistributedNotificationCenter.default().addObserver(
       forName: AgentTrackerNotification.inboxChanged,
       object: nil,
@@ -50,13 +62,22 @@ final class AgentTrackerModel: ObservableObject {
       Task { @MainActor in self?.refresh() }
     }
     refresh()
+    configureUsagePolling()
   }
 
   func stop() {
+    isStarted = false
     timer?.invalidate()
+    usageTask?.cancel()
+    usageTask = nil
     if let distributedObserver {
       DistributedNotificationCenter.default().removeObserver(distributedObserver)
     }
+  }
+
+  func refreshUsage() {
+    guard usageMetersEnabled else { return }
+    startUsagePolling()
   }
 
   func refresh() {
@@ -136,6 +157,47 @@ final class AgentTrackerModel: ObservableObject {
       if kill(pid, 0) != 0, errno == ESRCH {
         try store.markUnavailable(runID: run.runID)
       }
+    }
+  }
+
+  private func configureUsagePolling() {
+    guard isStarted else { return }
+    if usageMetersEnabled {
+      startUsagePolling()
+    } else {
+      usageTask?.cancel()
+      usageTask = nil
+      usageSnapshots = []
+      lastGoodUsage = [:]
+    }
+  }
+
+  private func startUsagePolling() {
+    usageTask?.cancel()
+    usageTask = Task { [weak self] in
+      while !Task.isCancelled {
+        let results = await UsageFetcher.fetchAll()
+        guard !Task.isCancelled else { return }
+        self?.acceptUsage(results)
+        do {
+          try await Task.sleep(for: .seconds(180))
+        } catch {
+          return
+        }
+      }
+    }
+  }
+
+  private func acceptUsage(_ results: [ProviderUsageSnapshot]) {
+    usageSnapshots = results.map { result in
+      if result.availability == .ok {
+        lastGoodUsage[result.harness] = result
+        return result
+      }
+      guard var previous = lastGoodUsage[result.harness] else { return result }
+      previous.availability = .stale
+      previous.message = result.message
+      return previous
     }
   }
 }

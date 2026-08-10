@@ -112,7 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   @objc private func showSettings() {
     if settingsWindow == nil {
       let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 560, height: 560),
+        contentRect: NSRect(x: 0, y: 0, width: 560, height: 640),
         styleMask: [.titled, .closable, .miniaturizable],
         backing: .buffered,
         defer: false

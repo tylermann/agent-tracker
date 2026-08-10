@@ -234,7 +234,11 @@ public final class IntegrationManager: @unchecked Sendable {
     var root = try jsonObject(at: url)
     root["version"] = root["version"] ?? 1
     var hooks = root["hooks"] as? [String: Any] ?? [:]
-    for event in ["sessionStart", "beforeSubmitPrompt", "preToolUse", "stop", "sessionEnd"] {
+    for event in [
+      "sessionStart", "beforeSubmitPrompt", "preToolUse", "postToolUse", "postToolUseFailure",
+      "beforeShellExecution", "afterShellExecution", "beforeMCPExecution", "afterMCPExecution",
+      "afterFileEdit", "stop", "sessionEnd",
+    ] {
       var entries = hooks[event] as? [[String: Any]] ?? []
       entries.removeAll(where: containsMarker)
       entries.append([

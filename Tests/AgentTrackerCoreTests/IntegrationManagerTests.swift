@@ -53,6 +53,15 @@ final class IntegrationManagerTests: XCTestCase {
     XCTAssertEqual(preToolUse.count, 1)
     XCTAssertEqual(preToolUse.first?["matcher"] as? String, "")
     XCTAssertFalse(String(describing: preToolUse).contains("old-helper"))
+
+    let cursorHooksRoot = try json(home.appendingPathComponent(".cursor/hooks.json"))
+    let cursorHooks = try XCTUnwrap(cursorHooksRoot["hooks"] as? [String: Any])
+    for event in [
+      "preToolUse", "postToolUse", "beforeShellExecution", "afterShellExecution",
+      "beforeMCPExecution", "afterMCPExecution",
+    ] {
+      XCTAssertEqual((cursorHooks[event] as? [[String: Any]])?.count, 1)
+    }
     let zshrc = try String(contentsOf: home.appendingPathComponent(".zshrc"), encoding: .utf8)
     XCTAssertEqual(zshrc.components(separatedBy: "# >>> agent-tracker >>>").count - 1, 1)
   }

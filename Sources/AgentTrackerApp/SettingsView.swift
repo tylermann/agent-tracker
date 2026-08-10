@@ -59,9 +59,18 @@ struct SettingsView: View {
         Button("Clear recent history", role: .destructive) { model.clearHistory() }
       }
 
+      Section("Usage meters") {
+        Toggle("Show Claude, Codex, and Cursor usage", isOn: $model.usageMetersEnabled)
+        Text(
+          "When enabled, Agent Tracker polls each provider about every three minutes using that product's existing local sign-in. These usage endpoints are undocumented and may change. Credentials are read at refresh time, sent only to the matching provider, and never stored by Agent Tracker."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+
       Section {
         Text(
-          "Prompt previews are capped at 120 characters. Transcripts are never stored, and Agent Tracker makes no network requests."
+          "Prompt previews are capped at 120 characters and transcripts are never stored. Agent Tracker makes no network requests while usage meters are off."
         )
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -69,7 +78,7 @@ struct SettingsView: View {
     }
     .formStyle(.grouped)
     .padding()
-    .frame(width: 560, height: 560)
+    .frame(width: 560, height: 640)
   }
 
   private func install() {

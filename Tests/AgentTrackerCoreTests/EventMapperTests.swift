@@ -58,6 +58,47 @@ final class EventMapperTests: XCTestCase {
     XCTAssertEqual(event.kind, .attentionRequired)
   }
 
+  func testCursorWebSearchNeedsAttentionAndUsesWorkspaceRoot() throws {
+    let payload = Data(
+      #"{"conversation_id":"cursor-1","workspace_roots":["/tmp/project"],"tool_name":"WebSearch"}"#
+        .utf8)
+    let event = try XCTUnwrap(
+      EventMapper.map(
+        harness: .cursor,
+        eventName: "preToolUse",
+        payloadData: payload,
+        environment: ["PWD": "/Users/example/.claude"]
+      ))
+
+    XCTAssertEqual(event.kind, .attentionRequired)
+    XCTAssertEqual(event.cwd, "/tmp/project")
+  }
+
+  func testCursorApprovalCompletionReturnsToActivity() throws {
+    let event = try XCTUnwrap(
+      EventMapper.map(
+        harness: .cursor,
+        eventName: "postToolUse",
+        payloadData: Data(#"{"tool_name":"WebSearch"}"#.utf8),
+        environment: [:]
+      ))
+
+    XCTAssertEqual(event.kind, .activity)
+  }
+
+  func testCursorShellAndMCPBeforeEventsNeedAttention() throws {
+    for eventName in ["beforeShellExecution", "beforeMCPExecution"] {
+      let event = try XCTUnwrap(
+        EventMapper.map(
+          harness: .cursor,
+          eventName: eventName,
+          payloadData: Data("{}".utf8),
+          environment: [:]
+        ))
+      XCTAssertEqual(event.kind, .attentionRequired)
+    }
+  }
+
   func testCompatibleCursorAndClaudeHooksShareOrphanRunID() throws {
     let payload = Data(#"{"session_id":"shared-session"}"#.utf8)
     let cursor = try XCTUnwrap(

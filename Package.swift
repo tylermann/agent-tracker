@@ -15,7 +15,7 @@ let package = Package(
     .target(
       name: "AgentTrackerCore",
       dependencies: ["CSQLite"],
-      linkerSettings: [.linkedLibrary("sqlite3")]
+      linkerSettings: [.linkedLibrary("sqlite3"), .linkedFramework("Security")]
     ),
     .executableTarget(
       name: "AgentTrackerCLI",

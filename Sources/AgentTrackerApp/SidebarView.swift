@@ -30,6 +30,10 @@ struct SidebarView: View {
           .padding(12)
         }
       }
+      if model.usageMetersEnabled {
+        Divider()
+        usageMeters
+      }
       if let error = model.errorMessage {
         Divider()
         Text(error)
@@ -42,6 +46,144 @@ struct SidebarView: View {
     }
     .frame(minWidth: 280, idealWidth: 320, minHeight: 360)
     .background(.ultraThinMaterial)
+  }
+
+  private var usageMeters: some View {
+    VStack(alignment: .leading, spacing: 7) {
+      HStack {
+        Text("Usage")
+          .font(.caption.bold())
+          .foregroundStyle(.secondary)
+        Spacer()
+        Button {
+          model.refreshUsage()
+        } label: {
+          Image(systemName: "arrow.clockwise")
+            .font(.caption2)
+        }
+        .buttonStyle(.plain)
+        .help("Refresh usage")
+      }
+      ForEach(Harness.allCases, id: \.self) { harness in
+        usageRow(harness, snapshot: model.usageSnapshots.first { $0.harness == harness })
+      }
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 9)
+  }
+
+  @ViewBuilder
+  private func usageRow(_ harness: Harness, snapshot: ProviderUsageSnapshot?) -> some View {
+    HStack(alignment: .top, spacing: 8) {
+      Text(harness.displayName)
+        .font(.caption)
+        .frame(width: 42, alignment: .leading)
+      if let snapshot {
+        switch snapshot.availability {
+        case .loggedOut, .error:
+          Text(snapshot.message ?? "Unavailable")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        case .ok, .stale:
+          VStack(spacing: 4) {
+            if let primary = snapshot.primary {
+              usageLine(
+                primary,
+                overage: primary.usedPercent >= 100 ? snapshot.overage : nil,
+                isStale: snapshot.availability == .stale
+              )
+            }
+            if harness == .claude, let modelSpecific = snapshot.modelSpecific {
+              usageLine(modelSpecific, isStale: snapshot.availability == .stale, compact: true)
+            }
+          }
+          .help(usageHelp(snapshot))
+        }
+      } else {
+        Text("Checking…")
+          .font(.caption2)
+          .foregroundStyle(.tertiary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+    }
+  }
+
+  private func usageLine(
+    _ window: UsageWindow,
+    overage: UsageOverage? = nil,
+    isStale: Bool,
+    compact: Bool = false
+  ) -> some View {
+    let display = meterDisplay(window: window, overage: overage)
+    return VStack(spacing: 2) {
+      HStack(spacing: 4) {
+        Text(display.label)
+          .lineLimit(1)
+        Spacer(minLength: 3)
+        if isStale {
+          Image(systemName: "clock.arrow.circlepath")
+        }
+        Text(display.value)
+          .monospacedDigit()
+      }
+      .font(.caption2)
+      .foregroundStyle(isStale ? .tertiary : .secondary)
+      GeometryReader { geometry in
+        ZStack(alignment: .leading) {
+          Capsule().fill(Color.primary.opacity(0.09))
+          Capsule()
+            .fill(display.color)
+            .frame(width: geometry.size.width * display.fraction)
+        }
+      }
+      .frame(height: compact ? 3 : 4)
+      .opacity(isStale ? 0.65 : 1)
+    }
+  }
+
+  private struct MeterDisplay {
+    var label: String
+    var value: String
+    var fraction: Double
+    var color: Color
+  }
+
+  private func meterDisplay(window: UsageWindow, overage: UsageOverage?) -> MeterDisplay {
+    if let overage, overage.isEnabled, let used = overage.usedPercent {
+      return MeterDisplay(
+        label: "Overage",
+        value: "\(Int(used.rounded()))% used",
+        fraction: min(max(used / 100, 0), 1),
+        color: .purple
+      )
+    }
+    let remaining = window.remainingPercent
+    let color: Color = remaining <= 10 ? .red : remaining <= 30 ? .orange : .green
+    return MeterDisplay(
+      label: window.label,
+      value: "\(Int(remaining.rounded()))% left",
+      fraction: min(max(window.usedPercent / 100, 0), 1),
+      color: color
+    )
+  }
+
+  private func usageHelp(_ snapshot: ProviderUsageSnapshot) -> String {
+    var lines: [String] = []
+    for window in [snapshot.primary, snapshot.secondary, snapshot.modelSpecific].compactMap({ $0 })
+    {
+      var line = "\(window.label): \(Int(window.remainingPercent.rounded()))% remaining"
+      if let reset = window.resetsAt {
+        line += ", resets \(reset.formatted(date: .abbreviated, time: .shortened))"
+      }
+      lines.append(line)
+    }
+    if snapshot.availability == .stale {
+      lines.append("Last update is stale: \(snapshot.message ?? "refresh failed")")
+    } else {
+      lines.append("Updated \(snapshot.fetchedAt.formatted(date: .omitted, time: .shortened))")
+    }
+    return lines.joined(separator: "\n")
   }
 
   private var header: some View {
