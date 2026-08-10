@@ -64,7 +64,9 @@ public enum EventMapper {
     )
     let runID =
       environment["AGENT_TRACKER_RUN_ID"]
-      ?? sessionID.map { "orphan-\(harness.rawValue)-\($0)" }
+      // Cursor CLI also executes Claude Code-compatible hooks. Keep the fallback identity
+      // harness-neutral so both hook formats resolve to the same underlying session.
+      ?? sessionID.map { "orphan-\($0)" }
       ?? "orphan-\(harness.rawValue)-\(UUID().uuidString)"
     let rawPrompt = string(in: payload, keys: ["prompt", "user_prompt", "userPrompt"])
     let detail = string(

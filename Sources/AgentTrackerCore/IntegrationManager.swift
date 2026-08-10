@@ -187,9 +187,9 @@ public final class IntegrationManager: @unchecked Sendable {
       "SessionEnd",
     ] {
       var entries = hooks[event] as? [[String: Any]] ?? []
-      guard !containsMarker(entries) else { continue }
+      entries = removingNestedManagedCommands(from: entries)
       entries.append([
-        "matcher": event == "PreToolUse" ? "AskQuestion|request_user_input" : "",
+        "matcher": "",
         "hooks": [
           [
             "type": "command",
@@ -212,9 +212,9 @@ public final class IntegrationManager: @unchecked Sendable {
       "SessionStart", "UserPromptSubmit", "PermissionRequest", "PreToolUse", "Stop", "SessionEnd",
     ] {
       var entries = hooks[event] as? [[String: Any]] ?? []
-      guard !containsMarker(entries) else { continue }
+      entries = removingNestedManagedCommands(from: entries)
       entries.append([
-        "matcher": event == "PreToolUse" ? "request_user_input" : "",
+        "matcher": "",
         "hooks": [
           [
             "type": "command",
@@ -236,7 +236,7 @@ public final class IntegrationManager: @unchecked Sendable {
     var hooks = root["hooks"] as? [String: Any] ?? [:]
     for event in ["sessionStart", "beforeSubmitPrompt", "preToolUse", "stop", "sessionEnd"] {
       var entries = hooks[event] as? [[String: Any]] ?? []
-      guard !containsMarker(entries) else { continue }
+      entries.removeAll(where: containsMarker)
       entries.append([
         "command": hookCommand(helperPath: helperPath, harness: .cursor, event: event),
         "timeout": 5,
@@ -275,22 +275,27 @@ public final class IntegrationManager: @unchecked Sendable {
     guard var hooks = root["hooks"] as? [String: Any] else { return }
     for (event, value) in hooks {
       guard let entries = value as? [[String: Any]] else { continue }
-      var kept: [[String: Any]] = []
-      for var entry in entries {
-        guard let commands = entry["hooks"] as? [[String: Any]] else {
-          if !containsMarker(entry) { kept.append(entry) }
-          continue
-        }
-        let remaining = commands.filter { !containsMarker($0) }
-        if !remaining.isEmpty {
-          entry["hooks"] = remaining
-          kept.append(entry)
-        }
-      }
+      let kept = removingNestedManagedCommands(from: entries)
       if kept.isEmpty { hooks.removeValue(forKey: event) } else { hooks[event] = kept }
     }
     root["hooks"] = hooks
     try writeJSON(root, to: url, backup: false)
+  }
+
+  private func removingNestedManagedCommands(from entries: [[String: Any]]) -> [[String: Any]] {
+    var kept: [[String: Any]] = []
+    for var entry in entries {
+      guard let commands = entry["hooks"] as? [[String: Any]] else {
+        if !containsMarker(entry) { kept.append(entry) }
+        continue
+      }
+      let remaining = commands.filter { !containsMarker($0) }
+      if !remaining.isEmpty {
+        entry["hooks"] = remaining
+        kept.append(entry)
+      }
+    }
+    return kept
   }
 
   private func containsMarker(_ value: Any) -> Bool {

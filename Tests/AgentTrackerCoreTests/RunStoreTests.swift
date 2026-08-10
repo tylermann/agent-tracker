@@ -63,6 +63,69 @@ final class RunStoreTests: XCTestCase {
       try store.run(id: "one")?.ghosttyTerminalID, try store.run(id: "two")?.ghosttyTerminalID)
   }
 
+  func testCursorHarnessWinsOverClaudeCompatibilityEvents() throws {
+    let claude = AgentEvent(
+      runID: "shared",
+      harness: .claude,
+      kind: .sessionStarted,
+      harnessSessionID: "session",
+      ghosttyTerminalID: "terminal"
+    )
+    let cursor = AgentEvent(
+      runID: "shared",
+      harness: .cursor,
+      kind: .promptSubmitted,
+      harnessSessionID: "session",
+      ghosttyTerminalID: "terminal"
+    )
+    var laterClaude = claude
+    laterClaude.eventID = UUID()
+    laterClaude.kind = .turnStopped
+    laterClaude.occurredAt = Date().addingTimeInterval(1)
+
+    _ = try store.apply(claude)
+    _ = try store.apply(cursor)
+    _ = try store.apply(laterClaude)
+
+    XCTAssertEqual(try store.run(id: "shared")?.harness, .cursor)
+    XCTAssertEqual(try store.run(id: "shared")?.status, .waiting)
+  }
+
+  func testLegacyHarnessQualifiedOrphansAreMergedOnOpen() throws {
+    let sessionID = "legacy-session"
+    _ = try store.apply(
+      AgentEvent(
+        runID: "orphan-claude-\(sessionID)",
+        harness: .claude,
+        kind: .promptSubmitted,
+        harnessSessionID: sessionID,
+        ghosttyTerminalID: "terminal",
+        cwd: "/Users/example/.claude",
+        promptPreview: "Fix it"
+      ))
+    _ = try store.apply(
+      AgentEvent(
+        runID: "orphan-cursor-\(sessionID)",
+        harness: .cursor,
+        kind: .promptSubmitted,
+        harnessSessionID: sessionID,
+        ghosttyTerminalID: "terminal",
+        cwd: "/Users/example/.cursor",
+        promptPreview: "Fix it"
+      ))
+
+    store = nil
+    store = try RunStore(paths: AgentTrackerPaths(root: temporaryDirectory))
+
+    let runs = try store.runs(includeRecentSince: .distantPast)
+    XCTAssertEqual(runs.count, 1)
+    XCTAssertEqual(runs.first?.runID, "orphan-\(sessionID)")
+    XCTAssertEqual(runs.first?.harness, .cursor)
+    XCTAssertEqual(runs.first?.workingDirectory, "/Users/example/.cursor")
+    XCTAssertNil(try store.run(id: "orphan-claude-\(sessionID)"))
+    XCTAssertNil(try store.run(id: "orphan-cursor-\(sessionID)"))
+  }
+
   private func event(_ kind: AgentEventKind, at date: Date, preview: String? = nil) -> AgentEvent {
     AgentEvent(
       occurredAt: date,

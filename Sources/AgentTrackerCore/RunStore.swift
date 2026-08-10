@@ -32,6 +32,7 @@ public final class RunStore: @unchecked Sendable {
     try execute("PRAGMA busy_timeout=1000")
     try execute("PRAGMA foreign_keys=ON")
     try execute(Self.schema)
+    try migrateHarnessQualifiedOrphans()
     try FileManager.default.setAttributes(
       [.posixPermissions: 0o600], ofItemAtPath: paths.database.path)
   }
@@ -139,7 +140,11 @@ public final class RunStore: @unchecked Sendable {
   }
 
   private func reduce(_ event: AgentEvent, into run: inout TrackedRun) {
-    run.harness = event.harness
+    // Cursor emits both native and Claude Code-compatible hooks. Once a native Cursor event
+    // identifies the shared run, do not let a later compatibility event relabel it as Claude.
+    if run.harness != .cursor || event.harness == .cursor {
+      run.harness = event.harness
+    }
     run.harnessSessionID = event.harnessSessionID ?? run.harnessSessionID
     run.ghosttyTerminalID = event.ghosttyTerminalID ?? run.ghosttyTerminalID
     run.executable = event.executable ?? run.executable
@@ -286,6 +291,87 @@ public final class RunStore: @unchecked Sendable {
     bind([.text(id)], to: statement)
     guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
     return decodeRun(statement)
+  }
+
+  private func migrateHarnessQualifiedOrphans() throws {
+    try withLock {
+      try executeUnlocked("BEGIN IMMEDIATE")
+      do {
+        let statement = try prepareUnlocked(
+          """
+          SELECT run_id, harness, harness_session_id, terminal_id, executable, pid,
+                 project_root, cwd, branch, prompt_preview, status, unread,
+                 started_at, last_event_at, ended_at, exit_code
+          FROM runs
+          WHERE harness_session_id IS NOT NULL AND run_id LIKE 'orphan-%'
+          """)
+        defer { sqlite3_finalize(statement) }
+
+        var legacySessions = Set<String>()
+        while sqlite3_step(statement) == SQLITE_ROW {
+          let run = decodeRun(statement)
+          guard let sessionID = run.harnessSessionID,
+            run.runID == "orphan-\(run.harness.rawValue)-\(sessionID)"
+          else { continue }
+          legacySessions.insert(sessionID)
+        }
+
+        for sessionID in legacySessions {
+          try migrateHarnessQualifiedOrphanUnlocked(sessionID: sessionID)
+        }
+        try executeUnlocked("COMMIT")
+      } catch {
+        try? executeUnlocked("ROLLBACK")
+        throw error
+      }
+    }
+  }
+
+  private func migrateHarnessQualifiedOrphanUnlocked(sessionID: String) throws {
+    let canonicalID = "orphan-\(sessionID)"
+    let legacyIDs = Harness.allCases.map { "orphan-\($0.rawValue)-\(sessionID)" }
+    let candidates = try ([canonicalID] + legacyIDs).compactMap { try runUnlocked(id: $0) }
+    guard !candidates.isEmpty else { return }
+
+    let preferred = candidates.max { lhs, rhs in
+      if lhs.lastEventAt != rhs.lastEventAt {
+        return lhs.lastEventAt < rhs.lastEventAt
+      }
+      return harnessPriority(lhs.harness) < harnessPriority(rhs.harness)
+    }!
+    let preferredHarness =
+      candidates.contains(where: { $0.harness == .cursor }) ? Harness.cursor : preferred.harness
+
+    var merged = preferred
+    merged.runID = canonicalID
+    merged.harness = preferredHarness
+    merged.startedAt = candidates.map(\.startedAt).min() ?? preferred.startedAt
+    merged.lastEventAt = candidates.map(\.lastEventAt).max() ?? preferred.lastEventAt
+
+    let metadataOrder =
+      candidates.filter { $0.harness == preferredHarness }
+      + candidates.filter { $0.harness != preferredHarness }
+    merged.harnessSessionID = metadataOrder.compactMap(\.harnessSessionID).first
+    merged.ghosttyTerminalID = metadataOrder.compactMap(\.ghosttyTerminalID).first
+    merged.executable = metadataOrder.compactMap(\.executable).first
+    merged.processID = metadataOrder.compactMap(\.processID).first
+    merged.projectRoot = metadataOrder.compactMap(\.projectRoot).first
+    merged.workingDirectory = metadataOrder.compactMap(\.workingDirectory).first
+    merged.branch = metadataOrder.compactMap(\.branch).first
+    merged.promptPreview = metadataOrder.compactMap(\.promptPreview).first
+
+    for run in candidates where run.runID != canonicalID {
+      try updateUnlocked(
+        "UPDATE events SET run_id = ? WHERE run_id = ?",
+        values: [.text(canonicalID), .text(run.runID)]
+      )
+      try updateUnlocked("DELETE FROM runs WHERE run_id = ?", values: [.text(run.runID)])
+    }
+    try upsertUnlocked(merged)
+  }
+
+  private func harnessPriority(_ harness: Harness) -> Int {
+    harness == .cursor ? 1 : 0
   }
 
   private func decodeRun(_ statement: OpaquePointer) -> TrackedRun {

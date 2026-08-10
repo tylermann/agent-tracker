@@ -58,6 +58,27 @@ final class EventMapperTests: XCTestCase {
     XCTAssertEqual(event.kind, .attentionRequired)
   }
 
+  func testCompatibleCursorAndClaudeHooksShareOrphanRunID() throws {
+    let payload = Data(#"{"session_id":"shared-session"}"#.utf8)
+    let cursor = try XCTUnwrap(
+      EventMapper.map(
+        harness: .cursor,
+        eventName: "sessionStart",
+        payloadData: payload,
+        environment: [:]
+      ))
+    let claude = try XCTUnwrap(
+      EventMapper.map(
+        harness: .claude,
+        eventName: "SessionStart",
+        payloadData: payload,
+        environment: [:]
+      ))
+
+    XCTAssertEqual(cursor.runID, "orphan-shared-session")
+    XCTAssertEqual(claude.runID, cursor.runID)
+  }
+
   func testPromptPreviewIsBounded() {
     let preview = EventMapper.promptPreview(String(repeating: "word ", count: 40))
     XCTAssertEqual(preview.count, 120)

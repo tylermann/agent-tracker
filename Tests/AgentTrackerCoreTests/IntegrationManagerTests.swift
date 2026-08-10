@@ -20,6 +20,11 @@ final class IntegrationManagerTests: XCTestCase {
       at: home.appendingPathComponent(".codex"), withIntermediateDirectories: true)
     try Data("notify = [\"existing\"]\n".utf8).write(
       to: home.appendingPathComponent(".codex/config.toml"))
+    try Data(
+      #"{"hooks":{"PreToolUse":[{"matcher":"request_user_input","hooks":[{"type":"command","command":"old-helper event --source agent-tracker --harness codex --event PreToolUse"}]}]}}"#
+        .utf8
+    )
+    .write(to: home.appendingPathComponent(".codex/hooks.json"))
   }
 
   override func tearDownWithError() throws {
@@ -42,6 +47,12 @@ final class IntegrationManagerTests: XCTestCase {
     let codexConfig = try String(
       contentsOf: home.appendingPathComponent(".codex/config.toml"), encoding: .utf8)
     XCTAssertEqual(codexConfig, "notify = [\"existing\"]\n")
+    let codexHooksRoot = try json(home.appendingPathComponent(".codex/hooks.json"))
+    let codexHooks = try XCTUnwrap(codexHooksRoot["hooks"] as? [String: Any])
+    let preToolUse = try XCTUnwrap(codexHooks["PreToolUse"] as? [[String: Any]])
+    XCTAssertEqual(preToolUse.count, 1)
+    XCTAssertEqual(preToolUse.first?["matcher"] as? String, "")
+    XCTAssertFalse(String(describing: preToolUse).contains("old-helper"))
     let zshrc = try String(contentsOf: home.appendingPathComponent(".zshrc"), encoding: .utf8)
     XCTAssertEqual(zshrc.components(separatedBy: "# >>> agent-tracker >>>").count - 1, 1)
   }
