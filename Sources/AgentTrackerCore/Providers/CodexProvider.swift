@@ -94,7 +94,7 @@ enum CodexProvider {
     let seconds =
       UsageParsing.number(value["limit_window_seconds"] ?? value["window_seconds"])
       ?? UsageParsing.number(value["limit_window_minutes"] ?? value["window_minutes"])
-        .map { $0 * 60 }
+      .map { $0 * 60 }
     return UsageParsing.window(
       value,
       label: seconds.map(windowLabel) ?? fallbackLabel,
@@ -132,8 +132,9 @@ public enum CodexConfiguration {
         ".codex", isDirectory: true)
     }
 
-    guard let configuration = try? String(
-      contentsOf: codexHome.appendingPathComponent("config.toml"), encoding: .utf8)
+    guard
+      let configuration = try? String(
+        contentsOf: codexHome.appendingPathComponent("config.toml"), encoding: .utf8)
     else {
       return false
     }

@@ -85,7 +85,8 @@ final class EventInboxTests: XCTestCase {
   func testEnqueuedFilesHaveOwnerOnlyPermissions() throws {
     try inbox.enqueue(event(at: Date(timeIntervalSince1970: 1_700_000_000)))
     let url = try XCTUnwrap(try inbox.pendingURLs().first)
-    let permissions = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions]
+    let permissions =
+      try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions]
       as? NSNumber
     XCTAssertEqual(permissions?.intValue, 0o600)
   }

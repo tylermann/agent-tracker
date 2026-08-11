@@ -26,8 +26,7 @@ enum EventCommand: Command {
       eventName: eventName,
       payloadData: payload,
       environment: environment
-    )
-    {
+    ) {
       try EventInbox().enqueue(event)
     }
     // Some providers' Stop-family hooks require valid JSON on stdout. An empty object is a no-op.

@@ -16,7 +16,8 @@ let package = Package(
       name: "AgentTrackerCore",
       dependencies: ["CSQLite"],
       linkerSettings: [
-        .linkedLibrary("sqlite3"), .linkedFramework("Security"),
+        // sqlite3 is linked by the CSQLite system-library modulemap.
+        .linkedFramework("Security"),
         .linkedFramework("LocalAuthentication"),
       ]
     ),

@@ -23,7 +23,9 @@ struct SidebarView: View {
                   VStack(spacing: 6) {
                     ForEach(model.recent) { runRow($0) }
                     if model.hasMoreRecent {
-                      Button("Show \(min(AgentTrackerModel.recentPageSize, model.remainingRecentCount)) more") {
+                      Button(
+                        "Show \(min(AgentTrackerModel.recentPageSize, model.remainingRecentCount)) more"
+                      ) {
                         model.showMoreRecent()
                       }
                       .buttonStyle(.bordered)

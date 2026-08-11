@@ -4,16 +4,13 @@ set -euo pipefail
 SCRIPT_DIR=${0:A:h}
 PROJECT_DIR=${SCRIPT_DIR:h}
 CONFIGURATION=${1:-release}
-MODULE_CACHE="$PROJECT_DIR/.build/module-cache"
-SWIFTPM_CACHE="$PROJECT_DIR/.build/swiftpm-module-cache"
+source "$SCRIPT_DIR/env.sh"
 
 cd "$PROJECT_DIR"
-env CLANG_MODULE_CACHE_PATH="$MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFTPM_CACHE" \
-    swift build --disable-sandbox -c "$CONFIGURATION"
-BIN_DIR=$(env CLANG_MODULE_CACHE_PATH="$MODULE_CACHE" SWIFTPM_MODULECACHE_OVERRIDE="$SWIFTPM_CACHE" \
-    swift build --disable-sandbox -c "$CONFIGURATION" --show-bin-path)
+swift_build -c "$CONFIGURATION"
+BIN_DIR=$(swift_build -c "$CONFIGURATION" --show-bin-path)
 
-APP_DIR="$PROJECT_DIR/dist/Agent Tracker.app"
+APP_DIR="$PROJECT_DIR/dist/$APP_BUNDLE_NAME"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 HELPERS_DIR="$CONTENTS_DIR/Helpers"

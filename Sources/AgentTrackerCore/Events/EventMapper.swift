@@ -24,7 +24,8 @@ public enum EventMapper {
     case "permissionrequest":
       // Codex emits this hook before its optional automatic reviewer decides whether the command
       // can proceed. It is only an in-progress review in that mode, not an actionable prompt.
-      kind = harness == .codex && environment["AGENT_TRACKER_CODEX_AUTO_REVIEW"] == "1"
+      kind =
+        harness == .codex && environment["AGENT_TRACKER_CODEX_AUTO_REVIEW"] == "1"
         ? .activity : .attentionRequired
     case "notification":
       let notificationType = string(

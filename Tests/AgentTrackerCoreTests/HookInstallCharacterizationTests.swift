@@ -92,9 +92,10 @@ final class HookInstallCharacterizationTests: XCTestCase {
     }
     XCTAssertEqual(contents, expected)
 
-    let permissions = try FileManager.default.attributesOfItem(
-      atPath: home.appendingPathComponent(".config/agent-tracker/shell.zsh").path
-    )[.posixPermissions] as? NSNumber
+    let permissions =
+      try FileManager.default.attributesOfItem(
+        atPath: home.appendingPathComponent(".config/agent-tracker/shell.zsh").path
+      )[.posixPermissions] as? NSNumber
     XCTAssertEqual(permissions?.intValue, 0o600)
   }
 
@@ -196,8 +197,9 @@ final class HookInstallCharacterizationTests: XCTestCase {
     for path in paths {
       let contents = try String(contentsOf: home.appendingPathComponent(path), encoding: .utf8)
       XCTAssertTrue(contents.hasSuffix("\n"), path)
-      let permissions = try FileManager.default.attributesOfItem(
-        atPath: home.appendingPathComponent(path).path)[.posixPermissions] as? NSNumber
+      let permissions =
+        try FileManager.default.attributesOfItem(
+          atPath: home.appendingPathComponent(path).path)[.posixPermissions] as? NSNumber
       XCTAssertEqual(permissions?.intValue, 0o600, path)
     }
   }
@@ -205,7 +207,8 @@ final class HookInstallCharacterizationTests: XCTestCase {
   func testInstallBacksUpExistingConfiguration() throws {
     try FileManager.default.createDirectory(
       at: home.appendingPathComponent(".claude"), withIntermediateDirectories: true)
-    try Data(#"{"model":"opus"}"#.utf8).write(to: home.appendingPathComponent(".claude/settings.json"))
+    try Data(#"{"model":"opus"}"#.utf8).write(
+      to: home.appendingPathComponent(".claude/settings.json"))
 
     _ = try manager().install(helperPath: helperPath)
 
