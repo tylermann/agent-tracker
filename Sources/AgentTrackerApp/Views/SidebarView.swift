@@ -19,25 +19,43 @@ struct SidebarView: View {
               runSection("Working", tint: .blue, runs: model.working)
               runSection("Idle", tint: .gray, runs: model.idle)
               if model.recentTotalCount > 0 {
-                DisclosureGroup(isExpanded: $model.recentExpanded) {
-                  VStack(spacing: 6) {
-                    ForEach(model.recent) { runRow($0) }
-                    if model.hasMoreRecent {
-                      Button(
-                        "Show \(min(AgentTrackerModel.recentPageSize, model.remainingRecentCount)) more"
-                      ) {
-                        model.showMoreRecent()
-                      }
-                      .buttonStyle(.bordered)
-                      .controlSize(.small)
-                      .frame(maxWidth: .infinity)
-                      .padding(.top, 2)
-                      .accessibilityHint("Loads older recent agent runs")
+                VStack(alignment: .leading, spacing: 6) {
+                  Button {
+                    model.recentExpanded.toggle()
+                  } label: {
+                    HStack(spacing: 6) {
+                      Image(systemName: model.recentExpanded ? "chevron.down" : "chevron.right")
+                        .font(SidebarTypography.caption.weight(.semibold))
+                        .frame(width: 10)
+                      sectionLabel("Recent", tint: .secondary, count: model.recentTotalCount)
+                      Spacer(minLength: 0)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                   }
-                  .padding(.top, 6)
-                } label: {
-                  sectionLabel("Recent", tint: .secondary, count: model.recentTotalCount)
+                  .buttonStyle(.plain)
+                  .accessibilityLabel("Recent")
+                  .accessibilityValue(model.recentExpanded ? "Expanded" : "Collapsed")
+                  .accessibilityHint("Shows or hides recent agent runs")
+
+                  if model.recentExpanded {
+                    VStack(spacing: 6) {
+                      ForEach(model.recent) { runRow($0) }
+                      if model.hasMoreRecent {
+                        Button(
+                          "Show \(min(AgentTrackerModel.recentPageSize, model.remainingRecentCount)) more"
+                        ) {
+                          model.showMoreRecent()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 2)
+                        .accessibilityHint("Loads older recent agent runs")
+                      }
+                    }
+                    .padding(.top, 6)
+                  }
                 }
               }
             }
@@ -58,7 +76,7 @@ struct SidebarView: View {
       if let error = model.errorMessage {
         Divider()
         Text(error)
-          .font(.caption)
+          .font(SidebarTypography.caption)
           .foregroundStyle(.red)
           .lineLimit(2)
           .padding(8)
@@ -76,14 +94,14 @@ struct SidebarView: View {
     VStack(alignment: .leading, spacing: 7) {
       HStack {
         Text("Usage")
-          .font(.caption.bold())
+          .font(SidebarTypography.caption.weight(.bold))
           .foregroundStyle(.secondary)
         Spacer()
         Button {
           model.refreshUsage()
         } label: {
           Image(systemName: "arrow.clockwise")
-            .font(.caption2)
+            .font(SidebarTypography.caption2)
         }
         .buttonStyle(.plain)
         .help("Refresh usage")
@@ -99,13 +117,13 @@ struct SidebarView: View {
   @ViewBuilder
   private func usageRow(_ harness: Harness, snapshot: ProviderUsageSnapshot?) -> some View {
     HStack(alignment: .top, spacing: 8) {
-      providerLabel(harness, font: .caption)
+      providerLabel(harness, font: SidebarTypography.caption)
         .frame(width: 64, alignment: .leading)
       if let snapshot {
         switch snapshot.availability {
         case .loggedOut, .error:
           Text(snapshot.message ?? "Unavailable")
-            .font(.caption2)
+            .font(SidebarTypography.caption2)
             .foregroundStyle(.tertiary)
             .frame(maxWidth: .infinity, alignment: .leading)
         case .ok, .stale:
@@ -125,7 +143,7 @@ struct SidebarView: View {
         }
       } else {
         Text("Checking…")
-          .font(.caption2)
+          .font(SidebarTypography.caption2)
           .foregroundStyle(.tertiary)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
@@ -150,7 +168,7 @@ struct SidebarView: View {
         Text(display.value)
           .monospacedDigit()
       }
-      .font(.caption2)
+      .font(SidebarTypography.caption2)
       .foregroundStyle(isStale ? .tertiary : .secondary)
       GeometryReader { geometry in
         ZStack(alignment: .leading) {
@@ -164,7 +182,7 @@ struct SidebarView: View {
       .opacity(isStale ? 0.65 : 1)
       if let resetsAt = window.resetsAt {
         Text(RunPresentation.resetLabel(resetsAt))
-          .font(.system(size: 9))
+          .font(SidebarTypography.resetLabel)
           .foregroundStyle(.tertiary)
           .lineLimit(1)
           .frame(maxWidth: .infinity, alignment: .trailing)
@@ -175,11 +193,11 @@ struct SidebarView: View {
   private var header: some View {
     HStack {
       Text("Agents")
-        .font(.headline)
+        .font(SidebarTypography.headline)
       Spacer()
       if model.unreadCount > 0 {
         Text("\(model.unreadCount)")
-          .font(.caption.bold())
+          .font(SidebarTypography.caption.weight(.bold))
           .padding(.horizontal, 7)
           .padding(.vertical, 3)
           .background(.orange, in: Capsule())
@@ -215,11 +233,11 @@ struct SidebarView: View {
         .fill(tint)
         .frame(width: 7, height: 7)
       Text(title)
-        .font(.caption.weight(.semibold))
+        .font(SidebarTypography.caption.weight(.semibold))
         .foregroundStyle(.secondary)
         .textCase(.uppercase)
       Text("\(count)")
-        .font(.caption2.monospacedDigit())
+        .font(SidebarTypography.caption2.monospacedDigit())
         .foregroundStyle(.tertiary)
     }
   }
@@ -231,9 +249,9 @@ struct SidebarView: View {
     } label: {
       VStack(alignment: .leading, spacing: 3) {
         HStack {
-          providerLabel(run.harness, font: .subheadline.bold())
+          providerLabel(run.harness, font: SidebarTypography.subheadline.weight(.bold))
           Text(run.status.displayName)
-            .font(.caption)
+            .font(SidebarTypography.caption)
             .foregroundStyle(.secondary)
           Spacer()
           if run.status == .working {
@@ -247,12 +265,12 @@ struct SidebarView: View {
           }
         }
         Text(RunPresentation.projectName(run))
-          .font(.caption)
+          .font(SidebarTypography.caption)
           .foregroundStyle(.secondary)
           .lineLimit(1)
         if let preview = run.promptPreview {
           Text(preview)
-            .font(.caption)
+            .font(SidebarTypography.caption)
             .foregroundStyle(.primary)
             .lineLimit(2)
         }
@@ -262,7 +280,7 @@ struct SidebarView: View {
           }
           Text(run.lastEventAt, style: .relative)
         }
-        .font(.caption2)
+        .font(SidebarTypography.caption2)
         .foregroundStyle(.tertiary)
       }
       .padding(9)
@@ -300,4 +318,13 @@ struct SidebarView: View {
       .frame(width: 17, height: 17)
       .accessibilityHidden(true)
   }
+}
+
+private enum SidebarTypography {
+  /// Keep the panel compact while making its dense text one point easier to read.
+  static let caption = Font.system(size: 12)
+  static let caption2 = Font.system(size: 11)
+  static let subheadline = Font.system(size: 12)
+  static let headline = Font.system(size: 18, weight: .semibold)
+  static let resetLabel = Font.system(size: 11)
 }

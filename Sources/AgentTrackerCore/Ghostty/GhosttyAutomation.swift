@@ -16,6 +16,8 @@ public enum GhosttyAutomationError: LocalizedError {
 }
 
 public enum GhosttyAutomation {
+  private static let detachedTerminalError = "Terminal is not in a window."
+
   public static func focusedTerminalID() throws -> String {
     let source = """
       tell application "Ghostty"
@@ -50,14 +52,70 @@ public enum GhosttyAutomation {
           return "missing"
       end tell
       """
-    guard try runScript(source) == "focused" else {
-      throw GhosttyAutomationError.terminalNotFound
+    do {
+      guard try runScript(source) == "focused" else {
+        throw GhosttyAutomationError.terminalNotFound
+      }
+    } catch GhosttyAutomationError.script(let message)
+      where message.contains(detachedTerminalError)
+    {
+      try focusAfterActivatingOwningWindow(terminalID: escaped, runScript: runScript)
     }
 
     // A nonactivating Agent Tracker panel can remain the key window after its button is
     // clicked. Activate Ghostty only after selecting the terminal so its input surface gets
     // keyboard focus and the user can type immediately.
     _ = try runScript("tell application \"Ghostty\" to activate")
+  }
+
+  private static func focusAfterActivatingOwningWindow(
+    terminalID: String,
+    runScript: (String) throws -> String
+  ) throws {
+    // Ghostty keeps split-zoom state per tab and detaches the other terminal views in that tab.
+    // After selecting the target tab, try focusing first; if the target is still detached, unzoom
+    // that tab's focused split as well before retrying.
+    let source = """
+      tell application "Ghostty"
+          repeat with candidateWindow in windows
+              repeat with candidateTab in tabs of candidateWindow
+                  repeat with candidate in terminals of candidateTab
+                      if id of candidate is "\(terminalID)" then
+                          select tab (contents of candidateTab)
+                          activate window candidateWindow
+                          try
+                              focus (contents of candidate)
+                              return "focused"
+                          on error messageText
+                              if messageText does not contain "\(detachedTerminalError)" then error messageText
+                          end try
+                          set focusedTabTerminal to focused terminal of candidateTab
+                          if id of focusedTabTerminal is not "\(terminalID)" then
+                              perform action "toggle_split_zoom" on focusedTabTerminal
+                          end if
+                          repeat with attempt from 1 to 30
+                              try
+                                  select tab (contents of candidateTab)
+                                  activate window candidateWindow
+                                  focus (contents of candidate)
+                                  return "focused"
+                              on error messageText
+                                  if messageText does not contain "\(detachedTerminalError)" then error messageText
+                                  delay 0.1
+                              end try
+                          end repeat
+                          focus (contents of candidate)
+                          return "focused"
+                      end if
+                  end repeat
+              end repeat
+          end repeat
+          return "missing"
+      end tell
+      """
+    guard try runScript(source) == "focused" else {
+      throw GhosttyAutomationError.terminalNotFound
+    }
   }
 
   public static func isFocused(terminalID: String) -> Bool {

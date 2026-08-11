@@ -6,7 +6,7 @@ import Foundation
 
 @MainActor
 final class AgentTrackerModel: ObservableObject {
-  static let recentPageSize = 20
+  static let recentPageSize = 10
 
   @Published private(set) var runs: [TrackedRun] = []
   @Published private(set) var recentTotalCount = 0

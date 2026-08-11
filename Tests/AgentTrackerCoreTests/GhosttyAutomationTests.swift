@@ -32,4 +32,95 @@ final class GhosttyAutomationTests: XCTestCase {
 
     XCTAssertEqual(scripts.count, 1)
   }
+
+  func testFocusSelectsOwningTabAndUnzoomsItWhenTargetTerminalIsDetached() throws {
+    var scripts: [String] = []
+
+    try GhosttyAutomation.focus(terminalID: "terminal-1") { source in
+      scripts.append(source)
+      switch scripts.count {
+      case 1:
+        throw GhosttyAutomationError.script("Terminal is not in a window.")
+      case 2:
+        return "focused"
+      default:
+        return ""
+      }
+    }
+
+    XCTAssertEqual(scripts.count, 3)
+    XCTAssertTrue(scripts[1].contains("repeat with candidateWindow in windows"))
+    XCTAssertTrue(scripts[1].contains("repeat with candidateTab in tabs of candidateWindow"))
+    XCTAssertTrue(scripts[1].contains("repeat with candidate in terminals of candidateTab"))
+    XCTAssertTrue(scripts[1].contains("select tab (contents of candidateTab)"))
+    XCTAssertTrue(scripts[1].contains("activate window candidateWindow"))
+    XCTAssertTrue(scripts[1].contains("set focusedTabTerminal to focused terminal of candidateTab"))
+    XCTAssertTrue(
+      scripts[1].contains("perform action \"toggle_split_zoom\" on focusedTabTerminal"))
+    XCTAssertTrue(scripts[1].contains("repeat with attempt from 1 to 30"))
+    XCTAssertTrue(scripts[1].contains("delay 0.1"))
+    XCTAssertTrue(scripts[1].contains("focus (contents of candidate)"))
+    XCTAssertEqual(scripts[2], "tell application \"Ghostty\" to activate")
+  }
+
+  func testFocusDoesNotRecoverFromUnrelatedAutomationError() throws {
+    var scripts: [String] = []
+
+    XCTAssertThrowsError(
+      try GhosttyAutomation.focus(terminalID: "terminal-1") { source in
+        scripts.append(source)
+        throw GhosttyAutomationError.script("Not authorized to send Apple events.")
+      }
+    ) { error in
+      guard case GhosttyAutomationError.script(let message) = error else {
+        return XCTFail("Expected script error, got \(error)")
+      }
+      XCTAssertEqual(message, "Not authorized to send Apple events.")
+    }
+
+    XCTAssertEqual(scripts.count, 1)
+  }
+
+  func testFocusPropagatesRecoveryScriptFailure() throws {
+    var scripts: [String] = []
+
+    XCTAssertThrowsError(
+      try GhosttyAutomation.focus(terminalID: "terminal-1") { source in
+        scripts.append(source)
+        if scripts.count == 1 {
+          throw GhosttyAutomationError.script("Terminal is not in a window.")
+        }
+        throw GhosttyAutomationError.script("Split zoom action failed.")
+      }
+    ) { error in
+      guard case GhosttyAutomationError.script(let message) = error else {
+        return XCTFail("Expected script error, got \(error)")
+      }
+      XCTAssertEqual(message, "Split zoom action failed.")
+    }
+
+    XCTAssertEqual(scripts.count, 2)
+  }
+
+  func testFocusDoesNotActivateGhosttyWhenDetachedTerminalIsMissingFromWindows() throws {
+    var scripts: [String] = []
+
+    XCTAssertThrowsError(
+      try GhosttyAutomation.focus(terminalID: "terminal-1") { source in
+        scripts.append(source)
+        switch scripts.count {
+        case 1:
+          throw GhosttyAutomationError.script("Terminal is not in a window.")
+        default:
+          return "missing"
+        }
+      }
+    ) { error in
+      guard case GhosttyAutomationError.terminalNotFound = error else {
+        return XCTFail("Expected terminalNotFound, got \(error)")
+      }
+    }
+
+    XCTAssertEqual(scripts.count, 2)
+  }
 }

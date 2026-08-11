@@ -7,7 +7,7 @@ import SwiftUI
 
 @MainActor
 final class PanelController: NSObject, NSWindowDelegate {
-  let panel: NSPanel
+  private let panel: KeyboardNavigationPanel
   private let model: AgentTrackerModel
   private var timer: Timer?
   private var isProgrammaticMove = false
@@ -15,13 +15,12 @@ final class PanelController: NSObject, NSWindowDelegate {
   private var cancellable: AnyCancellable?
   private var activationObserver: NSObjectProtocol?
   private var resignKeyObserver: NSObjectProtocol?
-  private var keyMonitor: Any?
   private var isKeyboardNavigating = false
   private var appToRestore: NSRunningApplication?
 
   init(model: AgentTrackerModel) {
     self.model = model
-    panel = NSPanel(
+    panel = KeyboardNavigationPanel(
       contentRect: NSRect(x: 100, y: 100, width: 320, height: 620),
       styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
       backing: .buffered,
@@ -46,6 +45,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     panel.minSize = NSSize(width: 280, height: 360)
     panel.contentView = NSHostingView(rootView: SidebarView(model: model))
     panel.delegate = self
+    panel.keyDownHandler = { [weak self] event in
+      self?.handleKeyDown(event) == nil
+    }
     cancellable = model.$isDetached.sink { [weak self] detached in
       guard !detached else { return }
       self?.updatePosition()
@@ -103,15 +105,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     panel.becomesKeyOnlyIfNeeded = false
     NSApp.activate(ignoringOtherApps: true)
     panel.makeKeyAndOrderFront(nil)
-    installKeyMonitor()
     observeResignKey()
-  }
-
-  private func installKeyMonitor() {
-    guard keyMonitor == nil else { return }
-    keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-      self?.handleKeyDown(event) ?? event
-    }
   }
 
   private func observeResignKey() {
@@ -148,8 +142,6 @@ final class PanelController: NSObject, NSWindowDelegate {
     isKeyboardNavigating = false
     model.endKeyboardSelection()
     panel.becomesKeyOnlyIfNeeded = true
-    if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
-    keyMonitor = nil
     if let resignKeyObserver { NotificationCenter.default.removeObserver(resignKeyObserver) }
     resignKeyObserver = nil
     let previous = appToRestore
@@ -276,6 +268,17 @@ final class PanelController: NSObject, NSWindowDelegate {
 
   private func screen(containingQuartzRect rect: CGRect) -> NSScreen {
     NSScreen.screens.first(where: { $0.frame.intersects(rect) }) ?? NSScreen.main!
+  }
+}
+
+/// Consumes keyboard-navigation events before AppKit routes them through the responder chain,
+/// which would otherwise play the system alert sound for an unhandled arrow key.
+private final class KeyboardNavigationPanel: NSPanel {
+  var keyDownHandler: ((NSEvent) -> Bool)?
+
+  override func sendEvent(_ event: NSEvent) {
+    if event.type == .keyDown, keyDownHandler?(event) == true { return }
+    super.sendEvent(event)
   }
 }
 
