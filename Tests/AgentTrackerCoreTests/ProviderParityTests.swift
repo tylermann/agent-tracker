@@ -3,9 +3,8 @@ import XCTest
 @testable import AgentTrackerCore
 
 /// Asserts that every hook event name the integration installer registers maps to the expected
-/// event kind. The event lists are duplicated from IntegrationManager here; once the provider
-/// registry exists, this test should read them from the registry instead so there is a single
-/// source of truth.
+/// event kind. The installed names come straight from ProviderRegistry, so a provider spec that
+/// registers an event this table does not anticipate fails the test.
 final class ProviderParityTests: XCTestCase {
   private let now = Date(timeIntervalSince1970: 1_700_000_000)
 
@@ -44,15 +43,22 @@ final class ProviderParityTests: XCTestCase {
   ]
 
   func testEveryInstalledHookNameMapsToExpectedKind() throws {
-    let table: [(Harness, [String: AgentEventKind])] = [
-      (.claude, claudeEvents), (.codex, codexEvents), (.cursor, cursorEvents),
+    let expectations: [Harness: [String: AgentEventKind]] = [
+      .claude: claudeEvents, .codex: codexEvents, .cursor: cursorEvents,
     ]
-    for (harness, events) in table {
-      for (eventName, expected) in events {
+    for spec in ProviderRegistry.all {
+      let table = try XCTUnwrap(expectations[spec.harness])
+      XCTAssertEqual(
+        Set(spec.hooks.events), Set(table.keys),
+        "\(spec.harness.rawValue) installs an event this test does not anticipate")
+      for eventName in spec.hooks.events {
+        let expected = try XCTUnwrap(table[eventName])
         let event = try EventMapper.map(
-          harness: harness, eventName: eventName, payloadData: Data(), environment: [:], now: now)
+          harness: spec.harness, eventName: eventName, payloadData: Data(), environment: [:],
+          now: now)
         XCTAssertEqual(
-          event?.kind, expected, "\(harness.rawValue) \(eventName) should map to \(expected)")
+          event?.kind, expected,
+          "\(spec.harness.rawValue) \(eventName) should map to \(expected)")
       }
     }
   }
