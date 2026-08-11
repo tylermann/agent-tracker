@@ -22,11 +22,30 @@ make app
 open "dist/Agent Tracker.app"
 ```
 
-To install the locally built, ad-hoc-signed app in `/Applications`:
+To install the locally built app in `/Applications`:
 
 ```sh
 make install
 ```
+
+### Stable local code signing
+
+By default, the build automatically uses an `Apple Development` signing identity when exactly one
+is available. Stable signing lets macOS retain Keychain, Accessibility, and Automation approvals
+across rebuilds. If no identity is available, or more than one is available, the build falls back to
+ad-hoc signing so an Apple Developer account is not required.
+
+To select an identity explicitly, use its name from
+`security find-identity -v -p codesigning`:
+
+```sh
+AGENT_TRACKER_SIGNING_IDENTITY="Apple Development: Your Name (TEAMID)" make install
+```
+
+After changing from ad-hoc to stable signing, macOS asks for the affected permissions one final
+time. Subsequent builds signed with the same identity and bundle identifier retain those grants.
+`make install` stops a running Agent Tracker instance before replacing its bundle, then relaunches
+it, so the running process and on-disk signature cannot get out of sync.
 
 On first launch:
 

@@ -33,6 +33,26 @@ RESOURCE_BUNDLE="$BIN_DIR/AgentTracker_AgentTrackerApp.bundle"
 /bin/mkdir -p "$RESOURCES_DIR"
 /bin/cp -R "$RESOURCE_BUNDLE" "$RESOURCES_DIR/"
 /bin/chmod 755 "$MACOS_DIR/AgentTracker" "$MACOS_DIR/agent-tracker" "$CLI_MACOS_DIR/agent-tracker"
-/usr/bin/codesign --force --deep --sign - "$APP_DIR"
+
+# A stable signing identity lets macOS carry Keychain and privacy grants across rebuilds. Prefer an
+# explicitly selected identity, then auto-select a sole Apple Development identity. Contributors
+# without an Apple signing identity still get a runnable local build via ad-hoc signing.
+SIGNING_IDENTITY=${AGENT_TRACKER_SIGNING_IDENTITY:-}
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  SIGNING_IDENTITY=$(
+    /usr/bin/security find-identity -v -p codesigning 2>/dev/null |
+      /usr/bin/awk -F'"' '
+        /"Apple Development:/ { identities[++count] = $2 }
+        END { if (count == 1) print identities[1] }
+      '
+  )
+fi
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  SIGNING_IDENTITY="-"
+  echo "No unique Apple Development identity found; using ad-hoc signing."
+else
+  echo "Signing with $SIGNING_IDENTITY"
+fi
+/usr/bin/codesign --force --deep --sign "$SIGNING_IDENTITY" "$APP_DIR"
 
 echo "$APP_DIR"
