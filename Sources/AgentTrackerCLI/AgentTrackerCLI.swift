@@ -2,15 +2,18 @@ import Foundation
 
 @main
 enum AgentTrackerCLI {
-  /// Order here is the order commands appear in the usage text.
-  static let commands: [any Command.Type] = [
-    WrapCommand.self,
-    EventCommand.self,
-    InstallCommand.self,
-    UninstallCommand.self,
-    DoctorCommand.self,
-    FocusCommand.self,
-  ]
+  /// Order here is the order commands appear in the usage text. Computed because a stored
+  /// `[any Command.Type]` global trips strict-concurrency checking even though it is immutable.
+  static var commands: [any Command.Type] {
+    [
+      WrapCommand.self,
+      EventCommand.self,
+      InstallCommand.self,
+      UninstallCommand.self,
+      DoctorCommand.self,
+      FocusCommand.self,
+    ]
+  }
 
   static func main() {
     do {
