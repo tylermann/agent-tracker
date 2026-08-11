@@ -178,7 +178,9 @@ final class PanelController: NSObject, NSWindowDelegate {
       if forceOrderFront { panel.orderFrontRegardless() }
       return
     }
-    guard let windowRect = focusedWindowRect(processID: app.processIdentifier) else {
+    guard let window = focusedWindow(processID: app.processIdentifier),
+      var windowRect = rect(of: window)
+    else {
       // Accessibility can be unavailable briefly during app/Space activation, and ad-hoc
       // development builds lose their grant whenever their code signature changes. Keep the
       // panel at its last known position instead of making Show flash and immediately disappear.
@@ -188,16 +190,20 @@ final class PanelController: NSObject, NSWindowDelegate {
     let screen = screen(containingQuartzRect: windowRect)
 
     let width = panel.frame.width
+    if reflowMaximizedTerminal,
+      let reflowed = shrinkIfMaximized(window, rect: windowRect, screen: screen, panelWidth: width)
+    {
+      windowRect = reflowed
+    }
     let desiredHeight = max(
       panel.minSize.height, min(windowRect.height, screen.visibleFrame.height))
-    let gap: CGFloat = 8
     let rightSpace = screen.visibleFrame.maxX - windowRect.maxX
     let leftSpace = windowRect.minX - screen.visibleFrame.minX
     let x: CGFloat
-    if rightSpace >= width + gap {
-      x = windowRect.maxX + gap
-    } else if leftSpace >= width + gap {
-      x = windowRect.minX - width - gap
+    if rightSpace >= width {
+      x = windowRect.maxX
+    } else if leftSpace >= width {
+      x = windowRect.minX - width
     } else {
       x = min(
         max(windowRect.maxX - width, screen.visibleFrame.minX), screen.visibleFrame.maxX - width)
@@ -216,7 +222,38 @@ final class PanelController: NSObject, NSWindowDelegate {
       || application.localizedName == "Ghostty"
   }
 
-  private func focusedWindowRect(processID: pid_t) -> CGRect? {
+  private var reflowMaximizedTerminal: Bool {
+    UserDefaults.standard.object(forKey: PreferenceKeys.reflowMaximizedTerminal) as? Bool ?? true
+  }
+
+  /// Raycast's "Maximize" (and the green zoom button) fill the whole visible frame, which buries the
+  /// panel behind the terminal. Give the terminal back everything except the panel's column so the
+  /// two tile side by side instead. Returns the new terminal rect, or nil when nothing was resized.
+  private func shrinkIfMaximized(
+    _ window: AXUIElement, rect currentRect: CGRect, screen: NSScreen, panelWidth: CGFloat
+  ) -> CGRect? {
+    let visible = screen.visibleFrame
+    let tolerance: CGFloat = 12
+    // A native-fullscreen window covers the menu bar, so it is taller than the visible frame. Those
+    // windows own their Space and must not be resized.
+    guard currentRect.height <= visible.height + tolerance else { return nil }
+    guard currentRect.minX <= visible.minX + tolerance,
+      currentRect.maxX >= visible.maxX - tolerance,
+      currentRect.minY <= visible.minY + tolerance,
+      currentRect.maxY >= visible.maxY - tolerance
+    else { return nil }
+    let targetWidth = visible.width - panelWidth
+    guard targetWidth >= 200 else { return nil }
+    // The window is already flush with the left edge of the visible frame, so only the width
+    // changes; leaving the position alone avoids a second AX write that could fight the terminal.
+    var size = CGSize(width: targetWidth, height: currentRect.height)
+    guard let sizeValue = AXValueCreate(.cgSize, &size) else { return nil }
+    guard AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue) == .success
+    else { return nil }
+    return rect(of: window) ?? CGRect(origin: currentRect.origin, size: size)
+  }
+
+  private func focusedWindow(processID: pid_t) -> AXUIElement? {
     let application = AXUIElementCreateApplication(processID)
     var windowValue: CFTypeRef?
     guard
@@ -227,7 +264,10 @@ final class PanelController: NSObject, NSWindowDelegate {
       ) == .success,
       let windowValue
     else { return nil }
-    let window = windowValue as! AXUIElement
+    return (windowValue as! AXUIElement)
+  }
+
+  private func rect(of window: AXUIElement) -> CGRect? {
     var positionValue: CFTypeRef?
     var sizeValue: CFTypeRef?
     guard

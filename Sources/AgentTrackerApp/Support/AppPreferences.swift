@@ -7,4 +7,5 @@ enum PreferenceKeys {
   static let panelDetached = "panelDetached"
   static let notifyNeedsAttention = "notifyNeedsAttention"
   static let notifyWaiting = "notifyWaiting"
+  static let reflowMaximizedTerminal = "reflowMaximizedTerminal"
 }

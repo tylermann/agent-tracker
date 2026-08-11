@@ -11,6 +11,7 @@ struct SettingsView: View {
   @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
   @AppStorage(PreferenceKeys.notifyNeedsAttention) private var notifyNeedsAttention = true
   @AppStorage(PreferenceKeys.notifyWaiting) private var notifyWaiting = true
+  @AppStorage(PreferenceKeys.reflowMaximizedTerminal) private var reflowMaximizedTerminal = true
 
   var body: some View {
     Form {
@@ -56,6 +57,12 @@ struct SettingsView: View {
           .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
         Toggle("Notify when approval or input is required", isOn: $notifyNeedsAttention)
         Toggle("Notify when a turn completes", isOn: $notifyWaiting)
+        Toggle("Leave room for the panel when Ghostty is maximized", isOn: $reflowMaximizedTerminal)
+        Text(
+          "Maximizing Ghostty — from Raycast, the green button, or a window manager — resizes it to the screen minus the panel's column so the two sit side by side."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
         Button("Clear recent history", role: .destructive) { model.clearHistory() }
       }
 
