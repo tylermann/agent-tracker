@@ -31,8 +31,14 @@ final class IntegrationManagerTests: XCTestCase {
     try? FileManager.default.removeItem(at: home)
   }
 
+  private func makeManager() -> IntegrationManager {
+    // A stubbed resolver keeps these tests off the real login shell (`zsh -lic`), which is slow
+    // and machine-dependent.
+    IntegrationManager(home: home, executableResolver: { "/usr/local/bin/\($0.rawValue)" })
+  }
+
   func testInstallIsIdempotentAndPreservesExistingConfiguration() throws {
-    let manager = IntegrationManager(home: home)
+    let manager = makeManager()
     _ = try manager.install(
       helperPath: "/Applications/Agent Tracker.app/Contents/MacOS/agent-tracker")
     _ = try manager.install(
@@ -67,7 +73,7 @@ final class IntegrationManagerTests: XCTestCase {
   }
 
   func testUninstallRemovesOnlyOwnedEntries() throws {
-    let manager = IntegrationManager(home: home)
+    let manager = makeManager()
     _ = try manager.install(
       helperPath: "/Applications/Agent Tracker.app/Contents/MacOS/agent-tracker")
     _ = try manager.uninstall()

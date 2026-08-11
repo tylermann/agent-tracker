@@ -15,13 +15,17 @@ public struct IntegrationReport: Sendable {
 public final class IntegrationManager: @unchecked Sendable {
   public let home: URL
   private let fileManager: FileManager
+  private let executableResolver: (@Sendable (Harness) -> String?)?
   private let marker = "--source agent-tracker"
 
   public init(
-    home: URL = FileManager.default.homeDirectoryForCurrentUser, fileManager: FileManager = .default
+    home: URL = FileManager.default.homeDirectoryForCurrentUser,
+    fileManager: FileManager = .default,
+    executableResolver: (@Sendable (Harness) -> String?)? = nil
   ) {
     self.home = home
     self.fileManager = fileManager
+    self.executableResolver = executableResolver
   }
 
   public func install(helperPath: String) throws -> IntegrationReport {
@@ -92,7 +96,13 @@ public final class IntegrationManager: @unchecked Sendable {
   }
 
   public func resolveHarnessExecutables() -> [Harness: String] {
-    Dictionary(
+    if let executableResolver {
+      return Dictionary(
+        uniqueKeysWithValues: Harness.allCases.compactMap { harness in
+          executableResolver(harness).map { (harness, $0) }
+        })
+    }
+    return Dictionary(
       uniqueKeysWithValues: Harness.allCases.compactMap { harness in
         resolveExecutable(named: harness == .cursor ? "agent" : harness.rawValue)
           .map { (harness, $0) }
