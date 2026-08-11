@@ -9,8 +9,8 @@ struct SettingsView: View {
   @ObservedObject var model: AgentTrackerModel
   @State private var integrationMessage = ""
   @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
-  @AppStorage("notifyNeedsAttention") private var notifyNeedsAttention = true
-  @AppStorage("notifyWaiting") private var notifyWaiting = true
+  @AppStorage(PreferenceKeys.notifyNeedsAttention) private var notifyNeedsAttention = true
+  @AppStorage(PreferenceKeys.notifyWaiting) private var notifyWaiting = true
 
   var body: some View {
     Form {
@@ -78,7 +78,9 @@ struct SettingsView: View {
     }
     .formStyle(.grouped)
     .padding()
-    .frame(width: 560, height: 640)
+    .frame(
+      width: AppConstants.settingsWindowSize.width,
+      height: AppConstants.settingsWindowSize.height)
   }
 
   private func install() {

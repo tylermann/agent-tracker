@@ -16,8 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
     UserDefaults.standard.register(defaults: [
-      "notifyNeedsAttention": true,
-      "notifyWaiting": true,
+      PreferenceKeys.notifyNeedsAttention: true,
+      PreferenceKeys.notifyWaiting: true,
     ])
     panelController = PanelController(model: model)
     configureStatusItem()
@@ -78,7 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
       heading.isEnabled = false
       menu.addItem(heading)
       for run in attention {
-        let title = "\(run.harness.displayName) — \(projectName(run))"
+        let title = "\(run.harness.displayName) — \(RunPresentation.projectName(run))"
         let item = menuItem(title, action: #selector(focusRun(_:)))
         item.representedObject = run.runID
         menu.addItem(item)
@@ -96,20 +96,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     return item
   }
 
-  private func projectName(_ run: TrackedRun) -> String {
-    let path = run.projectRoot ?? run.workingDirectory
-    return path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Unknown project"
-  }
-
   private func notify(run: TrackedRun, kind: AgentEventKind) {
     let defaults = UserDefaults.standard
-    if kind == .attentionRequired, !defaults.bool(forKey: "notifyNeedsAttention") { return }
-    if kind == .turnStopped, !defaults.bool(forKey: "notifyWaiting") { return }
+    if kind == .attentionRequired, !defaults.bool(forKey: PreferenceKeys.notifyNeedsAttention) {
+      return
+    }
+    if kind == .turnStopped, !defaults.bool(forKey: PreferenceKeys.notifyWaiting) { return }
     let content = UNMutableNotificationContent()
     content.title =
       kind == .attentionRequired
       ? "\(run.harness.displayName) needs attention" : "\(run.harness.displayName) finished a turn"
-    content.body = run.promptPreview ?? projectName(run)
+    content.body = run.promptPreview ?? RunPresentation.projectName(run)
     content.threadIdentifier = run.runID
     content.userInfo = ["runID": run.runID]
     if kind == .attentionRequired { content.sound = .default }
@@ -130,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   @objc private func showSettings() {
     if settingsWindow == nil {
       let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: 560, height: 640),
+        contentRect: NSRect(origin: .zero, size: AppConstants.settingsWindowSize),
         styleMask: [.titled, .closable, .miniaturizable],
         backing: .buffered,
         defer: false

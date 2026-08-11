@@ -1,7 +1,7 @@
 import Foundation
 
 public final class EventInbox: @unchecked Sendable {
-  public let paths: AgentTrackerPaths
+  private let paths: AgentTrackerPaths
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
 

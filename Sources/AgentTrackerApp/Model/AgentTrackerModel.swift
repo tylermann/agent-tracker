@@ -14,12 +14,12 @@ final class AgentTrackerModel: ObservableObject {
   @Published private(set) var usageSnapshots: [ProviderUsageSnapshot] = []
   @Published var usageMetersEnabled: Bool {
     didSet {
-      UserDefaults.standard.set(usageMetersEnabled, forKey: "usageMetersEnabled")
+      UserDefaults.standard.set(usageMetersEnabled, forKey: PreferenceKeys.usageMetersEnabled)
       configureUsagePolling()
     }
   }
   @Published var isDetached: Bool {
-    didSet { UserDefaults.standard.set(isDetached, forKey: "panelDetached") }
+    didSet { UserDefaults.standard.set(isDetached, forKey: PreferenceKeys.panelDetached) }
   }
   /// Run highlighted for keyboard navigation, or `nil` when the sidebar is not in keyboard mode.
   /// Tracked by run ID rather than row index so the highlight follows a run across the refreshes
@@ -48,8 +48,8 @@ final class AgentTrackerModel: ObservableObject {
   private var recentLimit = 0
 
   init() {
-    isDetached = UserDefaults.standard.bool(forKey: "panelDetached")
-    usageMetersEnabled = UserDefaults.standard.bool(forKey: "usageMetersEnabled")
+    isDetached = UserDefaults.standard.bool(forKey: PreferenceKeys.panelDetached)
+    usageMetersEnabled = UserDefaults.standard.bool(forKey: PreferenceKeys.usageMetersEnabled)
     do {
       inbox = try EventInbox()
       store = try RunStore()
@@ -203,11 +203,6 @@ final class AgentTrackerModel: ObservableObject {
     }
   }
 
-  func markSeen(runID: String) {
-    try? store?.markSeen(runID: runID)
-    refresh()
-  }
-
   func clearHistory() {
     guard let store else { return }
     do {
@@ -268,15 +263,6 @@ final class AgentTrackerModel: ObservableObject {
   }
 
   private func acceptUsage(_ results: [ProviderUsageSnapshot]) {
-    usageSnapshots = results.map { result in
-      if result.availability == .ok {
-        lastGoodUsage[result.harness] = result
-        return result
-      }
-      guard var previous = lastGoodUsage[result.harness] else { return result }
-      previous.availability = .stale
-      previous.message = result.message
-      return previous
-    }
+    usageSnapshots = UsageStalenessFilter.merge(results: results, lastGood: &lastGoodUsage)
   }
 }
