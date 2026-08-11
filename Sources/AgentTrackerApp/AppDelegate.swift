@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   private var statusItem: NSStatusItem!
   private var settingsWindow: NSWindow?
   private var cancellable: AnyCancellable?
+  private var focusSidebarHotKey: GlobalHotKey?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
@@ -23,12 +24,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     configureNotifications()
     model.onAttention = { [weak self] run, kind in self?.notify(run: run, kind: kind) }
     cancellable = model.$runs.sink { [weak self] _ in self?.rebuildMenu() }
+    configureHotKey()
     model.start()
     panelController.start()
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    focusSidebarHotKey?.unregister()
     model.stop()
+  }
+
+  private func configureHotKey() {
+    focusSidebarHotKey = GlobalHotKey(
+      keyCode: GlobalHotKey.FocusSidebar.keyCode,
+      modifiers: GlobalHotKey.FocusSidebar.modifiers
+    ) { [weak self] in
+      self?.panelController.focusForKeyboardNavigation()
+    }
+    if focusSidebarHotKey == nil {
+      model.errorMessage = "Another app already uses ⌘⇧' — the sidebar shortcut is unavailable."
+    }
   }
 
   private func configureStatusItem() {
@@ -48,7 +63,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     guard statusItem != nil else { return }
     statusItem.button?.title = model.unreadCount > 0 ? " \(model.unreadCount)" : ""
     let menu = NSMenu()
-    menu.addItem(menuItem("Show Agent Tracker", action: #selector(showPanel)))
+    let show = menuItem("Show Agent Tracker", action: #selector(showPanel))
+    show.keyEquivalent = GlobalHotKey.FocusSidebar.displayKeyEquivalent
+    show.keyEquivalentModifierMask = GlobalHotKey.FocusSidebar.displayModifiers
+    menu.addItem(show)
     menu.addItem(
       menuItem(
         model.isDetached ? "Attach to Ghostty" : "Reattach to Ghostty",
@@ -99,7 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     UNUserNotificationCenter.current().add(request)
   }
 
-  @objc private func showPanel() { panelController.show() }
+  @objc private func showPanel() { panelController.focusForKeyboardNavigation() }
   @objc private func attachPanel() { panelController.attach() }
 
   @objc private func focusRun(_ sender: NSMenuItem) {

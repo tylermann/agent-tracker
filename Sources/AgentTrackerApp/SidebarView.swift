@@ -1,33 +1,52 @@
 import AgentTrackerCore
+import AppKit
 import SwiftUI
 
 struct SidebarView: View {
   @ObservedObject var model: AgentTrackerModel
-  @State private var recentExpanded = false
 
   var body: some View {
     VStack(spacing: 0) {
       header
       Divider()
-      if model.runs.isEmpty {
+      if model.runs.isEmpty && model.recentTotalCount == 0 {
         emptyState
       } else {
-        ScrollView {
-          LazyVStack(alignment: .leading, spacing: 14) {
-            runSection("Needs You", runs: model.needsYou)
-            runSection("Working", runs: model.working)
-            runSection("Idle", runs: model.idle)
-            if !model.recent.isEmpty {
-              DisclosureGroup("Recent", isExpanded: $recentExpanded) {
-                VStack(spacing: 6) {
-                  ForEach(model.recent) { runRow($0) }
+        ScrollViewReader { proxy in
+          ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+              runSection("Needs You", tint: .orange, runs: model.needsYou)
+              runSection("Working", tint: .blue, runs: model.working)
+              runSection("Idle", tint: .gray, runs: model.idle)
+              if model.recentTotalCount > 0 {
+                DisclosureGroup(isExpanded: $model.recentExpanded) {
+                  VStack(spacing: 6) {
+                    ForEach(model.recent) { runRow($0) }
+                    if model.hasMoreRecent {
+                      Button("Show \(min(AgentTrackerModel.recentPageSize, model.remainingRecentCount)) more") {
+                        model.showMoreRecent()
+                      }
+                      .buttonStyle(.bordered)
+                      .controlSize(.small)
+                      .frame(maxWidth: .infinity)
+                      .padding(.top, 2)
+                      .accessibilityHint("Loads older recent agent runs")
+                    }
+                  }
+                  .padding(.top, 6)
+                } label: {
+                  sectionLabel("Recent", tint: .secondary, count: model.recentTotalCount)
                 }
-                .padding(.top, 6)
               }
-              .font(.headline)
+            }
+            .padding(12)
+          }
+          .onChange(of: model.selectedRunID) { _, selected in
+            guard let selected else { return }
+            withAnimation(.easeOut(duration: 0.12)) {
+              proxy.scrollTo(selected, anchor: .center)
             }
           }
-          .padding(12)
         }
       }
       if model.usageMetersEnabled {
@@ -45,6 +64,9 @@ struct SidebarView: View {
       }
     }
     .frame(minWidth: 280, idealWidth: 320, minHeight: 360)
+    // The transparent title bar reserves a large safe-area inset even though this panel does not
+    // show window controls. Let the header use that space so it sits close to the panel's top edge.
+    .ignoresSafeArea(.container, edges: .top)
     .background(.ultraThinMaterial)
   }
 
@@ -75,9 +97,8 @@ struct SidebarView: View {
   @ViewBuilder
   private func usageRow(_ harness: Harness, snapshot: ProviderUsageSnapshot?) -> some View {
     HStack(alignment: .top, spacing: 8) {
-      Text(harness.displayName)
-        .font(.caption)
-        .frame(width: 42, alignment: .leading)
+      providerLabel(harness, font: .caption)
+        .frame(width: 64, alignment: .leading)
       if let snapshot {
         switch snapshot.availability {
         case .loggedOut, .error:
@@ -139,7 +160,25 @@ struct SidebarView: View {
       }
       .frame(height: compact ? 3 : 4)
       .opacity(isStale ? 0.65 : 1)
+      if let resetsAt = window.resetsAt {
+        Text(resetLabel(resetsAt))
+          .font(.system(size: 9))
+          .foregroundStyle(.tertiary)
+          .lineLimit(1)
+          .frame(maxWidth: .infinity, alignment: .trailing)
+      }
     }
+  }
+
+  private func resetLabel(_ date: Date) -> String {
+    let calendar = Calendar.current
+    if calendar.isDateInToday(date) {
+      return "Resets today at \(date.formatted(date: .omitted, time: .shortened))"
+    }
+    if calendar.isDateInTomorrow(date) {
+      return "Resets tomorrow at \(date.formatted(date: .omitted, time: .shortened))"
+    }
+    return "Resets \(date.formatted(date: .abbreviated, time: .shortened))"
   }
 
   private struct MeterDisplay {
@@ -188,7 +227,7 @@ struct SidebarView: View {
 
   private var header: some View {
     HStack {
-      Label("Agents", systemImage: "person.2.fill")
+      Text("Agents")
         .font(.headline)
       Spacer()
       if model.unreadCount > 0 {
@@ -199,13 +238,6 @@ struct SidebarView: View {
           .background(.orange, in: Capsule())
           .foregroundStyle(.white)
       }
-      Button {
-        model.isDetached.toggle()
-      } label: {
-        Image(systemName: model.isDetached ? "arrow.down.left.and.arrow.up.right" : "pin.fill")
-      }
-      .buttonStyle(.plain)
-      .help(model.isDetached ? "Attach to Ghostty" : "Detach panel")
     }
     .padding(12)
   }
@@ -221,66 +253,131 @@ struct SidebarView: View {
   }
 
   @ViewBuilder
-  private func runSection(_ title: String, runs: [TrackedRun]) -> some View {
+  private func runSection(_ title: String, tint: Color, runs: [TrackedRun]) -> some View {
     if !runs.isEmpty {
       VStack(alignment: .leading, spacing: 6) {
-        Text(title).font(.headline)
+        sectionLabel(title, tint: tint, count: runs.count)
         ForEach(runs) { runRow($0) }
       }
     }
   }
 
+  private func sectionLabel(_ title: String, tint: Color, count: Int) -> some View {
+    HStack(spacing: 6) {
+      Circle()
+        .fill(tint)
+        .frame(width: 7, height: 7)
+      Text(title)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .textCase(.uppercase)
+      Text("\(count)")
+        .font(.caption2.monospacedDigit())
+        .foregroundStyle(.tertiary)
+    }
+  }
+
   private func runRow(_ run: TrackedRun) -> some View {
-    Button {
+    let isSelected = model.selectedRunID == run.runID
+    return Button {
       model.focus(run)
     } label: {
-      HStack(alignment: .top, spacing: 9) {
-        Circle()
-          .fill(statusColor(run.status))
-          .frame(width: 9, height: 9)
-          .padding(.top, 5)
-        VStack(alignment: .leading, spacing: 3) {
-          HStack {
-            Text(run.harness.displayName).font(.subheadline.bold())
-            Text(run.status.displayName)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            Spacer()
-            if run.unreadAttention {
-              Circle().fill(.orange).frame(width: 6, height: 6)
-            }
-          }
-          Text(projectName(run))
+      VStack(alignment: .leading, spacing: 3) {
+        HStack {
+          providerLabel(run.harness, font: .subheadline.bold())
+          Text(run.status.displayName)
             .font(.caption)
             .foregroundStyle(.secondary)
-            .lineLimit(1)
-          if let preview = run.promptPreview {
-            Text(preview)
-              .font(.caption)
-              .foregroundStyle(.primary)
-              .lineLimit(2)
+          Spacer()
+          if run.status == .working {
+            ProgressView()
+              .controlSize(.small)
+              .scaleEffect(0.55)
+              .frame(width: 12, height: 12)
           }
-          HStack(spacing: 5) {
-            if let branch = run.branch, !branch.isEmpty {
-              Label(branch, systemImage: "arrow.triangle.branch")
-            }
-            Text(run.lastEventAt, style: .relative)
+          if run.unreadAttention {
+            Circle().fill(.orange).frame(width: 6, height: 6)
           }
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
         }
+        Text(projectName(run))
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+        if let preview = run.promptPreview {
+          Text(preview)
+            .font(.caption)
+            .foregroundStyle(.primary)
+            .lineLimit(2)
+        }
+        HStack(spacing: 5) {
+          if let branch = run.branch, !branch.isEmpty {
+            Label(branch, systemImage: "arrow.triangle.branch")
+          }
+          Text(run.lastEventAt, style: .relative)
+        }
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
       }
       .padding(9)
-      .background(run.unreadAttention ? Color.orange.opacity(0.09) : Color.primary.opacity(0.045))
+      .padding(.leading, 5)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(rowBackground(run, isSelected: isSelected))
+      .overlay(alignment: .leading) {
+        statusColor(run.status).frame(width: 3)
+      }
       .clipShape(RoundedRectangle(cornerRadius: 9))
+      .overlay {
+        RoundedRectangle(cornerRadius: 9)
+          .strokeBorder(Color.accentColor, lineWidth: 2)
+          .opacity(isSelected ? 1 : 0)
+      }
       .contentShape(Rectangle())
+      .opacity(run.status == .starting || run.status == .ended ? 0.75 : 1)
     }
     .buttonStyle(.plain)
+    .id(run.runID)
+  }
+
+  private func rowBackground(_ run: TrackedRun, isSelected: Bool) -> Color {
+    if isSelected { return Color.accentColor.opacity(0.16) }
+    switch run.status {
+    case .needsAttention: return Color.orange.opacity(run.unreadAttention ? 0.14 : 0.1)
+    case .waiting: return Color.green.opacity(0.08)
+    case .working: return Color.blue.opacity(0.06)
+    case .starting, .ended, .unavailable: return Color.primary.opacity(0.045)
+    }
   }
 
   private func projectName(_ run: TrackedRun) -> String {
     let path = run.projectRoot ?? run.workingDirectory
     return path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Unknown project"
+  }
+
+  private func providerLabel(_ harness: Harness, font: Font) -> some View {
+    HStack(spacing: 5) {
+      providerIcon(harness)
+      Text(harness.displayName)
+        .font(font)
+    }
+  }
+
+  private func providerIcon(_ harness: Harness) -> some View {
+    Image(nsImage: providerImage(harness))
+      .resizable()
+      .interpolation(.high)
+      .frame(width: 17, height: 17)
+      .accessibilityHidden(true)
+  }
+
+  private func providerImage(_ harness: Harness) -> NSImage {
+    let name = harness.rawValue
+    guard let url = Bundle.module.url(
+      forResource: name, withExtension: "png"),
+      let image = NSImage(contentsOf: url)
+    else {
+      return NSImage(systemSymbolName: "terminal", accessibilityDescription: nil) ?? NSImage()
+    }
+    return image
   }
 
   private func statusColor(_ status: RunStatus) -> Color {

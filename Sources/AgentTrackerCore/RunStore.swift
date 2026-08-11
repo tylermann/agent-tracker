@@ -13,6 +13,16 @@ public enum RunStoreError: LocalizedError {
   }
 }
 
+public struct RunList: Sendable {
+  public let runs: [TrackedRun]
+  public let recentCount: Int
+
+  public init(runs: [TrackedRun], recentCount: Int) {
+    self.runs = runs
+    self.recentCount = recentCount
+  }
+}
+
 public final class RunStore: @unchecked Sendable {
   private var database: OpaquePointer?
   private let lock = NSLock()
@@ -43,13 +53,13 @@ public final class RunStore: @unchecked Sendable {
 
   @discardableResult
   public func apply(_ event: AgentEvent) throws -> TrackedRun {
-    try withLock {
+    let result: (run: TrackedRun, inserted: Bool) = try withLock {
       try executeUnlocked("BEGIN IMMEDIATE")
       do {
         let inserted = try insertEventUnlocked(event)
         if !inserted, let existing = try runUnlocked(id: event.runID) {
           try executeUnlocked("COMMIT")
-          return existing
+          return (existing, false)
         }
 
         var run =
@@ -61,16 +71,32 @@ public final class RunStore: @unchecked Sendable {
             lastEventAt: event.occurredAt
           )
         reduce(event, into: &run)
-        let metadata = GitMetadata.read(from: run.workingDirectory)
-        if run.projectRoot == nil { run.projectRoot = metadata.root }
-        if metadata.branch != nil { run.branch = metadata.branch }
         try upsertUnlocked(run)
         try executeUnlocked("COMMIT")
-        return run
+        return (run, true)
       } catch {
         try? executeUnlocked("ROLLBACK")
         throw error
       }
+    }
+
+    guard result.inserted else { return result.run }
+
+    // `Process.waitUntilExit()` in GitMetadata can service the main run loop. Never invoke it while
+    // holding the store lock: a timer or distributed notification may re-enter the model refresh
+    // and synchronously attempt to acquire this same lock.
+    let metadata = GitMetadata.read(from: result.run.workingDirectory)
+    guard metadata.root != nil || metadata.branch != nil else { return result.run }
+
+    return try withLock {
+      // A newer event may have changed the working directory while metadata was being read. Only
+      // apply results that still describe the current run, and preserve any newer run state.
+      guard var latest = try runUnlocked(id: event.runID) else { return result.run }
+      guard latest.workingDirectory == result.run.workingDirectory else { return latest }
+      if latest.projectRoot == nil { latest.projectRoot = metadata.root }
+      if metadata.branch != nil { latest.branch = metadata.branch }
+      try upsertUnlocked(latest)
+      return latest
     }
   }
 
@@ -102,6 +128,88 @@ public final class RunStore: @unchecked Sendable {
         result.append(decodeRun(statement))
       }
       return result
+    }
+  }
+
+  /// Returns every active run plus at most `recentLimit` terminal runs. Keeping the terminal
+  /// portion bounded makes this suitable for refresh-driven UI while `recentCount` still lets the
+  /// caller present an accurate "show more" affordance.
+  public func runList(
+    recentLimit: Int,
+    includeRecentSince cutoff: Date = Date().addingTimeInterval(-86_400)
+  ) throws -> RunList {
+    let limit = max(recentLimit, 0)
+    return try withLock {
+      let countStatement = try prepareUnlocked(
+        "SELECT COUNT(*) FROM runs WHERE ended_at IS NOT NULL AND ended_at >= ?")
+      defer { sqlite3_finalize(countStatement) }
+      sqlite3_bind_double(countStatement, 1, cutoff.timeIntervalSince1970)
+      guard sqlite3_step(countStatement) == SQLITE_ROW else {
+        throw RunStoreError.sqlite(errorMessage)
+      }
+      let recentCount = Int(sqlite3_column_int64(countStatement, 0))
+
+      let sql = """
+        SELECT run_id, harness, harness_session_id, terminal_id, executable, pid,
+               project_root, cwd, branch, prompt_preview, status, unread,
+               started_at, last_event_at, ended_at, exit_code
+        FROM runs
+        WHERE ended_at IS NULL OR run_id IN (
+          SELECT run_id
+          FROM runs
+          WHERE ended_at IS NOT NULL AND ended_at >= ?
+          ORDER BY last_event_at DESC
+          LIMIT ?
+        )
+        ORDER BY
+            CASE status
+                WHEN 'needsAttention' THEN 0
+                WHEN 'waiting' THEN 1
+                WHEN 'working' THEN 2
+                WHEN 'starting' THEN 3
+                ELSE 4
+            END,
+            last_event_at DESC
+        """
+      let statement = try prepareUnlocked(sql)
+      defer { sqlite3_finalize(statement) }
+      sqlite3_bind_double(statement, 1, cutoff.timeIntervalSince1970)
+      sqlite3_bind_int64(statement, 2, sqlite3_int64(limit))
+
+      var runs: [TrackedRun] = []
+      while sqlite3_step(statement) == SQLITE_ROW {
+        runs.append(decodeRun(statement))
+      }
+      return RunList(runs: runs, recentCount: recentCount)
+    }
+  }
+
+  /// Returns only live runs, for work such as process reconciliation that never needs history.
+  public func activeRuns() throws -> [TrackedRun] {
+    try withLock {
+      let statement = try prepareUnlocked(
+        """
+        SELECT run_id, harness, harness_session_id, terminal_id, executable, pid,
+               project_root, cwd, branch, prompt_preview, status, unread,
+               started_at, last_event_at, ended_at, exit_code
+        FROM runs
+        WHERE ended_at IS NULL
+        ORDER BY
+            CASE status
+                WHEN 'needsAttention' THEN 0
+                WHEN 'waiting' THEN 1
+                WHEN 'working' THEN 2
+                WHEN 'starting' THEN 3
+                ELSE 4
+            END,
+            last_event_at DESC
+        """)
+      defer { sqlite3_finalize(statement) }
+      var runs: [TrackedRun] = []
+      while sqlite3_step(statement) == SQLITE_ROW {
+        runs.append(decodeRun(statement))
+      }
+      return runs
     }
   }
 
@@ -456,5 +564,6 @@ public final class RunStore: @unchecked Sendable {
         exit_code INTEGER
     );
     CREATE INDEX IF NOT EXISTS runs_status ON runs(status, last_event_at DESC);
+    CREATE INDEX IF NOT EXISTS runs_recent ON runs(last_event_at DESC) WHERE ended_at IS NOT NULL;
     """
 }

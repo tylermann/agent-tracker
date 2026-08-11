@@ -48,6 +48,23 @@ final class UsageTests: XCTestCase {
     XCTAssertNotNil(snapshot.primary?.resetsAt)
   }
 
+  func testLabelsCodexWeeklyOnlyWindowFromDuration() throws {
+    let data = Data(
+      #"""
+      {
+        "rate_limit":{
+          "primary_window":{"used_percent":59,"limit_window_seconds":604800}
+        }
+      }
+      """#.utf8)
+
+    let snapshot = try UsageResponseParser.codex(data)
+
+    XCTAssertEqual(snapshot.primary?.label, "Week")
+    XCTAssertEqual(snapshot.primary?.remainingPercent, 41)
+    XCTAssertNil(snapshot.secondary)
+  }
+
   func testParsesCursorIncludedPoolNamedShareAndOverage() throws {
     let data = Data(
       #"""

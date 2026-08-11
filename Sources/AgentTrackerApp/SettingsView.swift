@@ -62,7 +62,7 @@ struct SettingsView: View {
       Section("Usage meters") {
         Toggle("Show Claude, Codex, and Cursor usage", isOn: $model.usageMetersEnabled)
         Text(
-          "When enabled, Agent Tracker polls each provider about every three minutes using that product's existing local sign-in. These usage endpoints are undocumented and may change. Credentials are read at refresh time, sent only to the matching provider, and never stored by Agent Tracker."
+          "When enabled, Agent Tracker polls each provider about every three minutes using that product's existing local sign-in. Automatic polls never open Keychain dialogs; click the refresh button in the sidebar to authorize access when needed. Credentials are read once per launch, kept only in memory, sent only to the matching provider, and never stored by Agent Tracker."
         )
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -102,7 +102,9 @@ struct SettingsView: View {
   }
 
   private var helperPath: String {
-    Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/agent-tracker").path
+    Bundle.main.bundleURL.appendingPathComponent(
+      "Contents/Helpers/Agent Tracker CLI.app/Contents/MacOS/agent-tracker"
+    ).path
   }
 
   private func requestAccessibility() {

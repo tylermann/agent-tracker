@@ -35,6 +35,21 @@ final class EventMapperTests: XCTestCase {
     XCTAssertEqual(event.kind, .attentionRequired)
   }
 
+  func testCodexPermissionRequestDuringAutomaticReviewRemainsWorking() throws {
+    let event = try XCTUnwrap(
+      EventMapper.map(
+        harness: .codex,
+        eventName: "PermissionRequest",
+        payloadData: Data(#"{"tool_name":"Bash"}"#.utf8),
+        environment: [
+          "AGENT_TRACKER_RUN_ID": "run-automatic-review",
+          "AGENT_TRACKER_CODEX_AUTO_REVIEW": "1",
+        ]
+      ))
+
+    XCTAssertEqual(event.kind, .activity)
+  }
+
   func testNonAttentionClaudeNotificationIsIgnored() throws {
     let payload = Data(#"{"notification_type":"auth_success"}"#.utf8)
     XCTAssertNil(

@@ -63,6 +63,33 @@ final class RunStoreTests: XCTestCase {
       try store.run(id: "one")?.ghosttyTerminalID, try store.run(id: "two")?.ghosttyTerminalID)
   }
 
+  func testRunListLimitsRecentsWhileKeepingAllActiveRuns() throws {
+    let base = Date(timeIntervalSince1970: 1_700_000_000)
+    for offset in 0..<3 {
+      _ = try store.apply(
+        AgentEvent(
+          occurredAt: base.addingTimeInterval(TimeInterval(offset)),
+          runID: "ended-\(offset)",
+          harness: .codex,
+          kind: .processExited
+        ))
+    }
+    _ = try store.apply(
+      AgentEvent(
+        occurredAt: base.addingTimeInterval(10),
+        runID: "active",
+        harness: .claude,
+        kind: .promptSubmitted
+      ))
+
+    let list = try store.runList(recentLimit: 2, includeRecentSince: .distantPast)
+
+    XCTAssertEqual(list.recentCount, 3)
+    XCTAssertEqual(list.runs.filter { $0.endedAt != nil }.map(\.runID), ["ended-2", "ended-1"])
+    XCTAssertEqual(list.runs.filter { $0.endedAt == nil }.map(\.runID), ["active"])
+    XCTAssertEqual(try store.activeRuns().map(\.runID), ["active"])
+  }
+
   func testCursorHarnessWinsOverClaudeCompatibilityEvents() throws {
     let claude = AgentEvent(
       runID: "shared",

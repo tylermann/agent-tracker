@@ -1,6 +1,7 @@
 import AgentTrackerCore
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 import Combine
 import SwiftUI
 
@@ -13,6 +14,10 @@ final class PanelController: NSObject, NSWindowDelegate {
   private var userHidden = false
   private var cancellable: AnyCancellable?
   private var activationObserver: NSObjectProtocol?
+  private var resignKeyObserver: NSObjectProtocol?
+  private var keyMonitor: Any?
+  private var isKeyboardNavigating = false
+  private var appToRestore: NSRunningApplication?
 
   init(model: AgentTrackerModel) {
     self.model = model
@@ -23,8 +28,17 @@ final class PanelController: NSObject, NSWindowDelegate {
       defer: false
     )
     super.init()
-    panel.title = "Agent Tracker"
+    // Keep the native frame for resize and drag support, but let the sidebar content
+    // occupy the title-bar area. The panel is controlled from the menu-bar item, so
+    // its traffic-light controls add visual noise without providing a useful action.
+    panel.styleMask.insert(.fullSizeContentView)
+    panel.titleVisibility = .hidden
+    panel.titlebarAppearsTransparent = true
+    panel.standardWindowButton(.closeButton)?.isHidden = true
+    panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+    panel.standardWindowButton(.zoomButton)?.isHidden = true
     panel.isFloatingPanel = false
+    panel.becomesKeyOnlyIfNeeded = true
     panel.level = .normal
     panel.hidesOnDeactivate = false
     panel.isReleasedWhenClosed = false
@@ -70,6 +84,79 @@ final class PanelController: NSObject, NSWindowDelegate {
   func attach() {
     model.isDetached = false
     show()
+  }
+
+  /// Brings the panel forward and hands it the keyboard so arrows move the highlight and Return
+  /// focuses the highlighted run. Invoked from the global hot key, so the frontmost app is usually
+  /// Ghostty and this app has to activate itself to receive key events at all.
+  func focusForKeyboardNavigation() {
+    show()
+    if let frontmost = NSWorkspace.shared.frontmostApplication,
+      frontmost.processIdentifier != ProcessInfo.processInfo.processIdentifier
+    {
+      appToRestore = frontmost
+    }
+    model.beginKeyboardSelection()
+    isKeyboardNavigating = true
+    // The panel is deliberately click-through the rest of the time; allow it to take key status for
+    // the duration of keyboard navigation only.
+    panel.becomesKeyOnlyIfNeeded = false
+    NSApp.activate(ignoringOtherApps: true)
+    panel.makeKeyAndOrderFront(nil)
+    installKeyMonitor()
+    observeResignKey()
+  }
+
+  private func installKeyMonitor() {
+    guard keyMonitor == nil else { return }
+    keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+      self?.handleKeyDown(event) ?? event
+    }
+  }
+
+  private func observeResignKey() {
+    guard resignKeyObserver == nil else { return }
+    resignKeyObserver = NotificationCenter.default.addObserver(
+      forName: NSWindow.didResignKeyNotification,
+      object: panel,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor in self?.endKeyboardNavigation(reactivatingPreviousApp: false) }
+    }
+  }
+
+  private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
+    guard isKeyboardNavigating, event.window === panel else { return event }
+    switch Int(event.keyCode) {
+    case kVK_UpArrow:
+      model.moveSelection(by: -1)
+    case kVK_DownArrow:
+      model.moveSelection(by: 1)
+    case kVK_Return, kVK_ANSI_KeypadEnter:
+      // `focus` activates Ghostty itself, so there is no previous app left to restore.
+      if model.activateSelection() { endKeyboardNavigation(reactivatingPreviousApp: false) }
+    case kVK_Escape:
+      endKeyboardNavigation(reactivatingPreviousApp: true)
+    default:
+      return event
+    }
+    return nil
+  }
+
+  private func endKeyboardNavigation(reactivatingPreviousApp: Bool) {
+    guard isKeyboardNavigating else { return }
+    isKeyboardNavigating = false
+    model.endKeyboardSelection()
+    panel.becomesKeyOnlyIfNeeded = true
+    if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+    keyMonitor = nil
+    if let resignKeyObserver { NotificationCenter.default.removeObserver(resignKeyObserver) }
+    resignKeyObserver = nil
+    let previous = appToRestore
+    appToRestore = nil
+    if reactivatingPreviousApp, let previous, !previous.isTerminated {
+      previous.activate()
+    }
   }
 
   func windowDidMove(_ notification: Notification) {

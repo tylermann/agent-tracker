@@ -6,7 +6,10 @@ import Foundation
 
 @MainActor
 final class AgentTrackerModel: ObservableObject {
+  static let recentPageSize = 20
+
   @Published private(set) var runs: [TrackedRun] = []
+  @Published private(set) var recentTotalCount = 0
   @Published var errorMessage: String?
   @Published private(set) var usageSnapshots: [ProviderUsageSnapshot] = []
   @Published var usageMetersEnabled: Bool {
@@ -17,6 +20,18 @@ final class AgentTrackerModel: ObservableObject {
   }
   @Published var isDetached: Bool {
     didSet { UserDefaults.standard.set(isDetached, forKey: "panelDetached") }
+  }
+  /// Run highlighted for keyboard navigation, or `nil` when the sidebar is not in keyboard mode.
+  /// Tracked by run ID rather than row index so the highlight follows a run across the refreshes
+  /// that reorder and regroup rows every 0.75s.
+  @Published var selectedRunID: String?
+  /// Owned by the model rather than the view so keyboard navigation can walk the Recent rows only
+  /// while they are actually on screen.
+  @Published var recentExpanded = false {
+    didSet {
+      recentLimit = recentExpanded ? Self.recentPageSize : 0
+      refresh()
+    }
   }
 
   var onAttention: ((TrackedRun, AgentEventKind) -> Void)?
@@ -29,6 +44,8 @@ final class AgentTrackerModel: ObservableObject {
   private var distributedObserver: NSObjectProtocol?
   private var didReconcile = false
   private var isStarted = false
+  private var isRefreshing = false
+  private var recentLimit = 0
 
   init() {
     isDetached = UserDefaults.standard.bool(forKey: "panelDetached")
@@ -48,6 +65,49 @@ final class AgentTrackerModel: ObservableObject {
   var working: [TrackedRun] { runs.filter { $0.status == .working } }
   var idle: [TrackedRun] { runs.filter { $0.status == .starting } }
   var recent: [TrackedRun] { runs.filter { $0.status == .ended || $0.status == .unavailable } }
+  var hasMoreRecent: Bool { recent.count < recentTotalCount }
+  var remainingRecentCount: Int { max(recentTotalCount - recent.count, 0) }
+
+  /// Rows the arrow keys walk, in the order they are drawn in the sidebar.
+  var navigableRuns: [TrackedRun] {
+    needsYou + working + idle + (recentExpanded ? recent : [])
+  }
+
+  /// Selects a starting row when entering keyboard mode, keeping any still-visible selection.
+  func beginKeyboardSelection() {
+    let candidates = navigableRuns
+    if let selectedRunID, candidates.contains(where: { $0.runID == selectedRunID }) { return }
+    selectedRunID = candidates.first?.runID
+  }
+
+  func endKeyboardSelection() {
+    selectedRunID = nil
+  }
+
+  /// Moves the highlight by `delta` rows, clamping at the ends rather than wrapping.
+  func moveSelection(by delta: Int) {
+    let candidates = navigableRuns
+    guard !candidates.isEmpty else { return }
+    guard let selectedRunID,
+      let index = candidates.firstIndex(where: { $0.runID == selectedRunID })
+    else {
+      self.selectedRunID = delta < 0 ? candidates.last?.runID : candidates.first?.runID
+      return
+    }
+    let target = min(max(index + delta, 0), candidates.count - 1)
+    self.selectedRunID = candidates[target].runID
+  }
+
+  /// Focuses the highlighted run, exactly as clicking its row does. Returns `false` when nothing is
+  /// selected, so the caller can leave keyboard mode running.
+  @discardableResult
+  func activateSelection() -> Bool {
+    guard let selectedRunID, let run = runs.first(where: { $0.runID == selectedRunID }) else {
+      return false
+    }
+    focus(run)
+    return true
+  }
 
   func start() {
     isStarted = true
@@ -77,10 +137,17 @@ final class AgentTrackerModel: ObservableObject {
 
   func refreshUsage() {
     guard usageMetersEnabled else { return }
-    startUsagePolling()
+    startUsagePolling(forceCredentialReload: true)
   }
 
   func refresh() {
+    // Git metadata lookup launches a short-lived subprocess whose wait can service the main run
+    // loop. Coalesce timer and inbox notifications that arrive during a refresh so they cannot
+    // recursively process the same event.
+    guard !isRefreshing else { return }
+    isRefreshing = true
+    defer { isRefreshing = false }
+
     guard let inbox, let store else { return }
     do {
       for url in try inbox.pendingURLs() {
@@ -108,7 +175,9 @@ final class AgentTrackerModel: ObservableObject {
         try store.prune(olderThan: Date().addingTimeInterval(-7 * 86_400))
         didReconcile = true
       }
-      runs = try store.runs()
+      let runList = try store.runList(recentLimit: recentLimit)
+      runs = runList.runs
+      recentTotalCount = runList.recentCount
     } catch {
       errorMessage = error.localizedDescription
     }
@@ -149,10 +218,16 @@ final class AgentTrackerModel: ObservableObject {
     }
   }
 
+  func showMoreRecent() {
+    guard recentExpanded, hasMoreRecent else { return }
+    recentLimit += Self.recentPageSize
+    refresh()
+  }
+
   private func reconcileProcesses() throws {
     guard let store else { return }
-    for run in try store.runs(includeRecentSince: .distantPast) {
-      guard run.endedAt == nil, let pid = run.processID else { continue }
+    for run in try store.activeRuns() {
+      guard let pid = run.processID else { continue }
       errno = 0
       if kill(pid, 0) != 0, errno == ESRCH {
         try store.markUnavailable(runID: run.runID)
@@ -169,14 +244,18 @@ final class AgentTrackerModel: ObservableObject {
       usageTask = nil
       usageSnapshots = []
       lastGoodUsage = [:]
+      Task { await UsageFetcher.clearCredentialCache() }
     }
   }
 
-  private func startUsagePolling() {
+  private func startUsagePolling(forceCredentialReload: Bool = false) {
     usageTask?.cancel()
     usageTask = Task { [weak self] in
+      var shouldReloadCredentials = forceCredentialReload
       while !Task.isCancelled {
-        let results = await UsageFetcher.fetchAll()
+        let results = await UsageFetcher.fetchAll(
+          forceCredentialReload: shouldReloadCredentials)
+        shouldReloadCredentials = false
         guard !Task.isCancelled else { return }
         self?.acceptUsage(results)
         do {

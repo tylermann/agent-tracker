@@ -53,10 +53,13 @@ enum AgentTrackerCLI {
       throw CLIError.missing("--event")
     }
     let payload = FileHandle.standardInput.readDataToEndOfFile()
-    let environment = GhosttyTerminalBinding.environmentByCapturingFocusedTerminal(
+    var environment = GhosttyTerminalBinding.environmentByCapturingFocusedTerminal(
       for: eventName,
       environment: ProcessInfo.processInfo.environment
     )
+    if harness == .codex, CodexConfiguration.usesAutomaticApprovalReview(environment: environment) {
+      environment["AGENT_TRACKER_CODEX_AUTO_REVIEW"] = "1"
+    }
     if let event = try EventMapper.map(
       harness: harness,
       eventName: eventName,
@@ -95,20 +98,16 @@ enum AgentTrackerCLI {
     environment["AGENT_TRACKER_HARNESS"] = harness.rawValue
     environment["AGENT_TRACKER_CHILD_PID"] = String(wrapperPID)
 
-    let child = Process()
-    child.executableURL = URL(fileURLWithPath: executable)
-    child.arguments = Array(childArguments.dropFirst())
-    child.environment = environment
-    child.currentDirectoryURL = URL(fileURLWithPath: cwd)
-    child.standardInput = FileHandle.standardInput
-    child.standardOutput = FileHandle.standardOutput
-    child.standardError = FileHandle.standardError
-
-    try child.run()
-    // The child was spawned with the terminal's process group and receives terminal-generated
-    // interrupts directly. Keep the wrapper alive long enough to persist its exit event.
+    // Foundation's Process creates a separate process group on macOS. An interactive child in
+    // that group is backgrounded relative to this wrapper, so its first terminal read receives
+    // SIGTTIN and it appears to hang. Spawn it in this foreground process group instead.
     signal(SIGINT, SIG_IGN)
     signal(SIGQUIT, SIG_IGN)
+    let childPID = try spawnForegroundChild(
+      executable: executable,
+      arguments: Array(childArguments.dropFirst()),
+      environment: environment
+    )
     try inbox.enqueue(
       AgentEvent(
         runID: runID,
@@ -119,11 +118,7 @@ enum AgentTrackerCLI {
         cwd: cwd,
         executable: executable
       ))
-    child.waitUntilExit()
-    let status: Int32 =
-      child.terminationReason == .uncaughtSignal
-      ? 128 + child.terminationStatus
-      : child.terminationStatus
+    let status = try waitForChild(childPID)
     try? inbox.enqueue(
       AgentEvent(
         runID: runID,
@@ -138,11 +133,83 @@ enum AgentTrackerCLI {
     exit(status)
   }
 
+  private static func spawnForegroundChild(
+    executable: String,
+    arguments: [String],
+    environment: [String: String]
+  ) throws -> pid_t {
+    var attributes: posix_spawnattr_t? = nil
+    guard posix_spawnattr_init(&attributes) == 0 else {
+      throw POSIXError(.EINVAL)
+    }
+    defer { posix_spawnattr_destroy(&attributes) }
+
+    var signals = sigset_t()
+    sigemptyset(&signals)
+    sigaddset(&signals, SIGINT)
+    sigaddset(&signals, SIGQUIT)
+    guard posix_spawnattr_setsigdefault(&attributes, &signals) == 0,
+      posix_spawnattr_setpgroup(&attributes, getpgrp()) == 0
+    else { throw POSIXError(.EINVAL) }
+
+    let flags = Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF)
+    guard posix_spawnattr_setflags(&attributes, flags) == 0 else {
+      throw POSIXError(.EINVAL)
+    }
+
+    var childPID: pid_t = 0
+    let environmentEntries = environment.map { "\($0.key)=\($0.value)" }
+    let result = withCStringArray([executable] + arguments) { argv in
+      withCStringArray(environmentEntries) { envp in
+        posix_spawn(&childPID, executable, nil, &attributes, argv, envp)
+      }
+    }
+    guard result == 0 else {
+      throw POSIXError(POSIXErrorCode(rawValue: result) ?? .EINVAL)
+    }
+    return childPID
+  }
+
+  private static func waitForChild(_ pid: pid_t) throws -> Int32 {
+    var waitStatus: Int32 = 0
+    while waitpid(pid, &waitStatus, 0) == -1 {
+      if errno == EINTR { continue }
+      throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EINVAL)
+    }
+    let signal = waitStatus & 0x7f
+    return signal == 0 ? (waitStatus >> 8) & 0xff : 128 + signal
+  }
+
+  private static func withCStringArray<Result>(
+    _ strings: [String],
+    _ body: (UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>) throws -> Result
+  ) rethrows -> Result {
+    var pointers = strings.map { strdup($0) }
+    pointers.append(nil)
+    defer {
+      for pointer in pointers {
+        if let pointer { free(pointer) }
+      }
+    }
+    return try pointers.withUnsafeMutableBufferPointer { buffer in
+      try body(buffer.baseAddress!)
+    }
+  }
+
   private static func launchAppIfAvailable() {
-    let helperURL = URL(fileURLWithPath: executablePath()).standardizedFileURL
-    let contentsURL = helperURL.deletingLastPathComponent().deletingLastPathComponent()
-    guard contentsURL.lastPathComponent == "Contents" else { return }
-    let appURL = contentsURL.deletingLastPathComponent()
+    var candidate = URL(fileURLWithPath: executablePath()).standardizedFileURL
+      .deletingLastPathComponent()
+    var appURL: URL?
+    while candidate.path != "/" {
+      if candidate.pathExtension == "app",
+        Bundle(url: candidate)?.bundleIdentifier == "com.tyler.agenttracker"
+      {
+        appURL = candidate
+        break
+      }
+      candidate.deleteLastPathComponent()
+    }
+    guard let appURL else { return }
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
     process.arguments = ["-gj", appURL.path]

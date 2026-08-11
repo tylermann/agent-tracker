@@ -31,6 +31,13 @@ public enum GhosttyAutomation {
   }
 
   public static func focus(terminalID: String) throws {
+    try focus(terminalID: terminalID, runScript: run)
+  }
+
+  static func focus(
+    terminalID: String,
+    runScript: (String) throws -> String
+  ) throws {
     let escaped = appleScriptString(terminalID)
     let source = """
       tell application "Ghostty"
@@ -43,9 +50,14 @@ public enum GhosttyAutomation {
           return "missing"
       end tell
       """
-    guard try run(source) == "focused" else {
+    guard try runScript(source) == "focused" else {
       throw GhosttyAutomationError.terminalNotFound
     }
+
+    // A nonactivating Agent Tracker panel can remain the key window after its button is
+    // clicked. Activate Ghostty only after selecting the terminal so its input surface gets
+    // keyboard focus and the user can type immediately.
+    _ = try runScript("tell application \"Ghostty\" to activate")
   }
 
   public static func isFocused(terminalID: String) -> Bool {

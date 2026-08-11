@@ -2,6 +2,7 @@ import CSQLite
 import Foundation
 
 #if canImport(Security)
+  import LocalAuthentication
   import Security
 #endif
 
@@ -127,15 +128,13 @@ public enum UsageResponseParser {
   {
     let root = try dictionary(data)
     let limits = (root["rate_limit"] ?? root["rateLimits"]) as? [String: Any] ?? [:]
-    let primary = window(
+    let primary = codexWindow(
       limits["primary_window"] ?? limits["primary"],
-      label: "5h",
-      usedKeys: ["used_percent", "usedPercent"]
+      fallbackLabel: "Usage"
     )
-    let secondary = window(
+    let secondary = codexWindow(
       limits["secondary_window"] ?? limits["secondary"],
-      label: "Week",
-      usedKeys: ["used_percent", "usedPercent"]
+      fallbackLabel: "Secondary"
     )
     guard primary != nil || secondary != nil else { throw UsageParseError.missingUsage }
     return ProviderUsageSnapshot(
@@ -224,6 +223,31 @@ public enum UsageResponseParser {
     return UsageWindow(label: label, usedPercent: used, resetsAt: resetsAt)
   }
 
+  private static func codexWindow(_ raw: Any?, fallbackLabel: String) -> UsageWindow? {
+    guard let value = raw as? [String: Any] else { return nil }
+    let seconds =
+      number(value["limit_window_seconds"] ?? value["window_seconds"])
+      ?? number(value["limit_window_minutes"] ?? value["window_minutes"]).map { $0 * 60 }
+    return window(
+      value,
+      label: seconds.map(codexWindowLabel) ?? fallbackLabel,
+      usedKeys: ["used_percent", "usedPercent"]
+    )
+  }
+
+  private static func codexWindowLabel(seconds: Double) -> String {
+    let hours = seconds / 3_600
+    if abs(hours - 168) < 0.1 { return "Week" }
+    if hours >= 24, abs(hours.rounded() - hours) < 0.1 {
+      return "\(Int(hours.rounded() / 24))d"
+    }
+    if hours >= 1, abs(hours.rounded() - hours) < 0.1 {
+      return "\(Int(hours.rounded()))h"
+    }
+    let minutes = max(1, Int((seconds / 60).rounded()))
+    return "\(minutes)m"
+  }
+
   private static func claudeModelWindow(_ root: [String: Any]) -> UsageWindow? {
     let candidates = root.keys.filter { $0.hasPrefix("seven_day_") }
     let ordered = candidates.sorted { left, right in
@@ -294,7 +318,10 @@ public enum UsageCredentialError: LocalizedError {
 }
 
 public enum UsageCredentialReader {
-  public static func claude(home: URL = FileManager.default.homeDirectoryForCurrentUser) throws
+  public static func claude(
+    home: URL = FileManager.default.homeDirectoryForCurrentUser,
+    allowKeychainPrompt: Bool = true
+  ) throws
     -> UsageCredential
   {
     let file = home.appendingPathComponent(".claude/.credentials.json")
@@ -306,7 +333,7 @@ public enum UsageCredentialReader {
     }
     #if canImport(Security)
       for service in ["Claude Code-credentials", "claude-code-credentials"] {
-        if let data = keychainPassword(service: service),
+        if let data = keychainPassword(service: service, allowPrompt: allowKeychainPrompt),
           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let oauth = root["claudeAiOauth"] as? [String: Any],
           let token = nonempty(oauth["accessToken"])
@@ -315,27 +342,40 @@ public enum UsageCredentialReader {
         }
       }
     #endif
+    if !allowKeychainPrompt {
+      throw UsageCredentialError.unavailable("Click refresh to authorize")
+    }
     throw UsageCredentialError.loggedOut
   }
 
-  public static func codex(home: URL = FileManager.default.homeDirectoryForCurrentUser) throws
+  public static func codex(
+    home: URL = FileManager.default.homeDirectoryForCurrentUser,
+    allowKeychainPrompt: Bool = true
+  ) throws
     -> UsageCredential
   {
     let file = home.appendingPathComponent(".codex/auth.json")
     if let root = json(at: file), let credential = codexCredential(root) { return credential }
     #if canImport(Security)
       // Codex uses this service when cli_auth_credentials_store is `keyring` or `auto`.
-      if let data = keychainPassword(service: "Codex Auth"),
+      if let data = keychainPassword(
+        service: "Codex Auth", allowPrompt: allowKeychainPrompt),
         let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
         let credential = codexCredential(root)
       {
         return credential
       }
     #endif
+    if !allowKeychainPrompt {
+      throw UsageCredentialError.unavailable("Click refresh to authorize")
+    }
     throw UsageCredentialError.loggedOut
   }
 
-  public static func cursor(home: URL = FileManager.default.homeDirectoryForCurrentUser) throws
+  public static func cursor(
+    home: URL = FileManager.default.homeDirectoryForCurrentUser,
+    allowKeychainPrompt: Bool = true
+  ) throws
     -> UsageCredential
   {
     let database = home.appendingPathComponent(
@@ -353,13 +393,17 @@ public enum UsageCredentialReader {
     #if canImport(Security)
       for prefix in ["cursor-agent", "agent", "cursor"] {
         if let data = keychainPassword(
-          service: "\(prefix)-access-token", account: "\(prefix)-user"),
+          service: "\(prefix)-access-token", account: "\(prefix)-user",
+          allowPrompt: allowKeychainPrompt),
           let token = String(data: data, encoding: .utf8), !token.isEmpty
         {
           return UsageCredential(accessToken: token)
         }
       }
     #endif
+    if !allowKeychainPrompt {
+      throw UsageCredentialError.unavailable("Click refresh to authorize")
+    }
     throw UsageCredentialError.loggedOut
   }
 
@@ -406,7 +450,11 @@ public enum UsageCredentialReader {
   }
 
   #if canImport(Security)
-    private static func keychainPassword(service: String, account: String? = nil) -> Data? {
+    private static func keychainPassword(
+      service: String,
+      account: String? = nil,
+      allowPrompt: Bool = true
+    ) -> Data? {
       var query: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: service,
@@ -414,6 +462,11 @@ public enum UsageCredentialReader {
         kSecMatchLimit as String: kSecMatchLimitOne,
       ]
       if let account { query[kSecAttrAccount as String] = account }
+      if !allowPrompt {
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        query[kSecUseAuthenticationContext as String] = context
+      }
       var result: CFTypeRef?
       guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
       return result as? Data

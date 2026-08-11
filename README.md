@@ -39,13 +39,17 @@ On first launch:
 Usage meters are off by default. Enable them in Settings to poll about every three minutes. The
 feature reuses local OAuth credentials and calls undocumented first-party usage endpoints; no extra
 API keys are needed, but providers may change these endpoints without notice. A failed refresh keeps
-the last good reading marked as stale, while signed-out providers show that status directly.
+the last good reading marked as stale, while signed-out providers show that status directly. Local
+credentials are read once per app launch and retained only in memory, so background polls do not
+repeatedly access Keychain. Automatic polls do not show Keychain dialogs; use the sidebar refresh
+button to explicitly authorize access when needed.
 
 The integration installer creates timestamped backups before changing existing configuration. It adds one marked block to `~/.zshrc`, writes a managed `~/.config/agent-tracker/shell.zsh`, and merges marked hook commands into the harness settings. Existing Codex `notify` configuration is not touched.
 
 ## CLI
 
-The app bundles a helper at `Agent Tracker.app/Contents/MacOS/agent-tracker`:
+The app bundles a background-only helper at
+`Agent Tracker.app/Contents/Helpers/Agent Tracker CLI.app/Contents/MacOS/agent-tracker`:
 
 ```text
 agent-tracker doctor

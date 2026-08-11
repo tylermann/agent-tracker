@@ -2,6 +2,45 @@ import AgentTrackerCore
 import Foundation
 
 enum UsageFetcher {
+  private actor CredentialCache {
+    private var credentials: [Harness: Result<UsageCredential, UsageCredentialError>] = [:]
+
+    func credential(for harness: Harness, reload: Bool) throws -> UsageCredential {
+      if !reload, let cached = credentials[harness] {
+        return try cached.get()
+      }
+      let result: Result<UsageCredential, UsageCredentialError>
+      do {
+        let credential: UsageCredential
+        switch harness {
+        case .claude:
+          credential = try UsageCredentialReader.claude(allowKeychainPrompt: reload)
+        case .codex:
+          credential = try UsageCredentialReader.codex(allowKeychainPrompt: reload)
+        case .cursor:
+          credential = try UsageCredentialReader.cursor(allowKeychainPrompt: reload)
+        }
+        result = .success(credential)
+      } catch let error as UsageCredentialError {
+        result = .failure(error)
+      } catch {
+        result = .failure(.unavailable(error.localizedDescription))
+      }
+      credentials[harness] = result
+      return try result.get()
+    }
+
+    func remove(_ harness: Harness) {
+      credentials.removeValue(forKey: harness)
+    }
+
+    func removeAll() {
+      credentials.removeAll()
+    }
+  }
+
+  private static let credentialCache = CredentialCache()
+
   private enum FetchError: LocalizedError {
     case rejected(Int)
     case invalidResponse
@@ -14,20 +53,25 @@ enum UsageFetcher {
     }
   }
 
-  static func fetchAll() async -> [ProviderUsageSnapshot] {
+  static func fetchAll(forceCredentialReload: Bool = false) async -> [ProviderUsageSnapshot] {
     await withTaskGroup(of: ProviderUsageSnapshot.self) { group in
-      group.addTask { await fetchClaude() }
-      group.addTask { await fetchCodex() }
-      group.addTask { await fetchCursor() }
+      group.addTask { await fetchClaude(forceCredentialReload: forceCredentialReload) }
+      group.addTask { await fetchCodex(forceCredentialReload: forceCredentialReload) }
+      group.addTask { await fetchCursor(forceCredentialReload: forceCredentialReload) }
       var results: [ProviderUsageSnapshot] = []
       for await result in group { results.append(result) }
       return results.sorted { harnessIndex($0.harness) < harnessIndex($1.harness) }
     }
   }
 
-  private static func fetchClaude() async -> ProviderUsageSnapshot {
+  static func clearCredentialCache() async {
+    await credentialCache.removeAll()
+  }
+
+  private static func fetchClaude(forceCredentialReload: Bool) async -> ProviderUsageSnapshot {
     do {
-      let credential = try UsageCredentialReader.claude()
+      let credential = try await credentialCache.credential(
+        for: .claude, reload: forceCredentialReload)
       var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
       request.timeoutInterval = 15
       request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -40,15 +84,17 @@ enum UsageFetcher {
     } catch UsageCredentialError.loggedOut {
       return unavailable(.claude, availability: .loggedOut, message: "Not logged in")
     } catch FetchError.rejected(let status) where status == 401 || status == 403 {
+      await credentialCache.remove(.claude)
       return unavailable(.claude, availability: .loggedOut, message: "Sign in to Claude again")
     } catch {
       return unavailable(.claude, message: concise(error))
     }
   }
 
-  private static func fetchCodex() async -> ProviderUsageSnapshot {
+  private static func fetchCodex(forceCredentialReload: Bool) async -> ProviderUsageSnapshot {
     do {
-      let credential = try UsageCredentialReader.codex()
+      let credential = try await credentialCache.credential(
+        for: .codex, reload: forceCredentialReload)
       var request = URLRequest(
         url: URL(string: "https://chatgpt.com/backend-api/wham/usage")!)
       request.timeoutInterval = 15
@@ -64,15 +110,17 @@ enum UsageFetcher {
     } catch UsageCredentialError.loggedOut {
       return unavailable(.codex, availability: .loggedOut, message: "Not logged in")
     } catch FetchError.rejected(let status) where status == 401 || status == 403 {
+      await credentialCache.remove(.codex)
       return unavailable(.codex, availability: .loggedOut, message: "Sign in to Codex again")
     } catch {
       return unavailable(.codex, message: concise(error))
     }
   }
 
-  private static func fetchCursor() async -> ProviderUsageSnapshot {
+  private static func fetchCursor(forceCredentialReload: Bool) async -> ProviderUsageSnapshot {
     do {
-      let credential = try UsageCredentialReader.cursor()
+      let credential = try await credentialCache.credential(
+        for: .cursor, reload: forceCredentialReload)
       var request = URLRequest(
         url: URL(
           string:
@@ -90,6 +138,7 @@ enum UsageFetcher {
     } catch UsageCredentialError.loggedOut {
       return unavailable(.cursor, availability: .loggedOut, message: "Not logged in")
     } catch FetchError.rejected(let status) where status == 401 || status == 403 {
+      await credentialCache.remove(.cursor)
       return unavailable(.cursor, availability: .loggedOut, message: "Sign in to Cursor again")
     } catch {
       return unavailable(.cursor, message: concise(error))
