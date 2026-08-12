@@ -106,7 +106,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     content.title =
       kind == .attentionRequired
       ? "\(run.harness.displayName) needs attention" : "\(run.harness.displayName) finished a turn"
-    content.body = run.promptPreview ?? RunPresentation.projectName(run)
+    content.body =
+      run.promptPreview.map { EventMapper.promptPreview($0, limit: 120) }
+      ?? RunPresentation.projectName(run)
     content.threadIdentifier = run.runID
     content.userInfo = ["runID": run.runID]
     if kind == .attentionRequired { content.sound = .default }

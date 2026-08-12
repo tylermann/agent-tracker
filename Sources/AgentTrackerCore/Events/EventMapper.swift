@@ -100,7 +100,9 @@ public enum EventMapper {
     )
   }
 
-  public static func promptPreview(_ text: String, limit: Int = 120) -> String {
+  /// The default limit stores enough of the prompt to fill an expanded sidebar row; callers that
+  /// only ever show a couple of lines (notifications) pass a shorter limit.
+  public static func promptPreview(_ text: String, limit: Int = 400) -> String {
     let normalized =
       text
       .components(separatedBy: .whitespacesAndNewlines)

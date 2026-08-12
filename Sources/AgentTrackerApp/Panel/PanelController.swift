@@ -17,6 +17,9 @@ final class PanelController: NSObject, NSWindowDelegate {
   private var resignKeyObserver: NSObjectProtocol?
   private var isKeyboardNavigating = false
   private var appToRestore: NSRunningApplication?
+  private var screenChangeObserver: NSObjectProtocol?
+  private var wakeObserver: NSObjectProtocol?
+  private var ignoreMovesUntil: Date = .distantPast
 
   init(model: AgentTrackerModel) {
     self.model = model
@@ -69,6 +72,20 @@ final class PanelController: NSObject, NSWindowDelegate {
       Task { @MainActor in
         self?.updatePosition(forceOrderFront: true)
       }
+    }
+    screenChangeObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.didChangeScreenParametersNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor in self?.reanchorAfterDisplayChange() }
+    }
+    wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.didWakeNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor in self?.reanchorAfterDisplayChange() }
     }
     timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
       Task { @MainActor in self?.updatePosition() }
@@ -126,6 +143,10 @@ final class PanelController: NSObject, NSWindowDelegate {
       model.moveSelection(by: -1)
     case kVK_DownArrow:
       model.moveSelection(by: 1)
+    case kVK_RightArrow:
+      model.expandSelection()
+    case kVK_LeftArrow:
+      model.collapseSelection()
     case kVK_Return, kVK_ANSI_KeypadEnter:
       // `focus` activates Ghostty itself, so there is no previous app left to restore.
       if model.activateSelection() { endKeyboardNavigation(reactivatingPreviousApp: false) }
@@ -152,9 +173,22 @@ final class PanelController: NSObject, NSWindowDelegate {
   }
 
   func windowDidMove(_ notification: Notification) {
-    if !isProgrammaticMove, panel.isVisible {
-      model.isDetached = true
-    }
+    guard !isProgrammaticMove, panel.isVisible else { return }
+    // Detaching is meant to record "the user dragged the panel somewhere they want it". AppKit also
+    // relocates windows on its own when the display set changes — closing the lid, waking, or
+    // unplugging a monitor — and those moves arrive here indistinguishable from a drag. Since the
+    // flag persists, one sleep/wake cycle used to leave the panel detached until Attach was clicked.
+    // A real drag always holds the left button down, and display shuffles never do.
+    guard NSEvent.pressedMouseButtons & 1 != 0, Date() >= ignoreMovesUntil else { return }
+    model.isDetached = true
+  }
+
+  /// Displays coming and going leave the panel wherever AppKit parked it, so re-run the anchoring
+  /// pass immediately instead of waiting on the timer, and ignore the moves AppKit makes settling
+  /// the new layout.
+  private func reanchorAfterDisplayChange() {
+    ignoreMovesUntil = Date().addingTimeInterval(3)
+    updatePosition(forceOrderFront: true)
   }
 
   func windowShouldClose(_ sender: NSWindow) -> Bool {

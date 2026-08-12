@@ -243,13 +243,56 @@ struct SidebarView: View {
   }
 
   private func runRow(_ run: TrackedRun) -> some View {
-    let isSelected = model.selectedRunID == run.runID
-    return Button {
+    RunRow(model: model, run: run)
+  }
+
+  private func providerLabel(_ harness: Harness, font: Font) -> some View {
+    ProviderLabel(harness: harness, font: font)
+  }
+}
+
+private struct ProviderLabel: View {
+  let harness: Harness
+  let font: Font
+
+  var body: some View {
+    HStack(spacing: 5) {
+      Image(nsImage: ProviderLogo.image(for: harness))
+        .resizable()
+        .interpolation(.high)
+        .frame(width: 17, height: 17)
+        .accessibilityHidden(true)
+      Text(harness.displayName)
+        .font(font)
+    }
+  }
+}
+
+private struct RunRow: View {
+  @ObservedObject var model: AgentTrackerModel
+  let run: TrackedRun
+
+  /// How much of the opening prompt a row shows before and after the disclosure chevron is used.
+  private static let collapsedLineLimit = 2
+  /// Ten lines is enough to show the whole stored preview at the panel's usual width.
+  private static let expandedLineLimit = 10
+
+  /// Measured off hidden copies of the preview so the chevron only appears on rows whose prompt is
+  /// actually cut off at the current panel width.
+  @State private var fullPreviewHeight: CGFloat = 0
+  @State private var clampedPreviewHeight: CGFloat = 0
+
+  private var isSelected: Bool { model.selectedRunID == run.runID }
+  private var isExpanded: Bool { model.isExpanded(run) }
+  private var canExpand: Bool { fullPreviewHeight > clampedPreviewHeight + 0.5 }
+
+  var body: some View {
+    Button {
       model.focus(run)
     } label: {
       VStack(alignment: .leading, spacing: 3) {
         HStack {
-          providerLabel(run.harness, font: SidebarTypography.subheadline.weight(.bold))
+          ProviderLabel(harness: run.harness, font: SidebarTypography.subheadline.weight(.bold))
           Text(run.status.displayName)
             .font(SidebarTypography.caption)
             .foregroundStyle(.secondary)
@@ -269,16 +312,20 @@ struct SidebarView: View {
           .foregroundStyle(.secondary)
           .lineLimit(1)
         if let preview = run.promptPreview {
-          Text(preview)
-            .font(SidebarTypography.caption)
-            .foregroundStyle(.primary)
-            .lineLimit(2)
+          previewText(preview)
+            .lineLimit(isExpanded ? Self.expandedLineLimit : Self.collapsedLineLimit)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(alignment: .topLeading) { previewMeasurements(preview) }
+            .onPreferenceChange(FullPreviewHeightKey.self) { fullPreviewHeight = $0 }
+            .onPreferenceChange(ClampedPreviewHeightKey.self) { clampedPreviewHeight = $0 }
         }
         HStack(spacing: 5) {
           if let branch = run.branch, !branch.isEmpty {
             Label(branch, systemImage: "arrow.triangle.branch")
           }
           Text(run.lastEventAt, style: .relative)
+          // Leave room for the disclosure chevron overlaid on this corner of the row.
+          if canExpand { Spacer(minLength: 22) }
         }
         .font(SidebarTypography.caption2)
         .foregroundStyle(.tertiary)
@@ -300,23 +347,70 @@ struct SidebarView: View {
       .opacity(run.status == .starting || run.status == .ended ? 0.75 : 1)
     }
     .buttonStyle(.plain)
+    // Layered over the row button rather than nested inside its label, which would never receive
+    // the click.
+    .overlay(alignment: .bottomTrailing) {
+      if canExpand { disclosure }
+    }
     .id(run.runID)
   }
 
-  private func providerLabel(_ harness: Harness, font: Font) -> some View {
-    HStack(spacing: 5) {
-      providerIcon(harness)
-      Text(harness.displayName)
-        .font(font)
+  private var disclosure: some View {
+    Button {
+      withAnimation(.easeOut(duration: 0.12)) { model.toggleExpanded(run) }
+    } label: {
+      Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+        .font(SidebarTypography.caption2.weight(.semibold))
+        .foregroundStyle(.tertiary)
+        .frame(width: 20, height: 18)
+        .contentShape(Rectangle())
     }
+    .buttonStyle(.plain)
+    .padding(.trailing, 4)
+    .padding(.bottom, 5)
+    .help(isExpanded ? "Show less of the prompt" : "Show more of the prompt")
+    .accessibilityLabel(isExpanded ? "Collapse prompt" : "Expand prompt")
   }
 
-  private func providerIcon(_ harness: Harness) -> some View {
-    Image(nsImage: ProviderLogo.image(for: harness))
-      .resizable()
-      .interpolation(.high)
-      .frame(width: 17, height: 17)
-      .accessibilityHidden(true)
+  private func previewText(_ preview: String) -> some View {
+    Text(preview)
+      .font(SidebarTypography.caption)
+      .foregroundStyle(.primary)
+      .multilineTextAlignment(.leading)
+  }
+
+  private func previewMeasurements(_ preview: String) -> some View {
+    ZStack(alignment: .topLeading) {
+      previewText(preview)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(
+          GeometryReader { geometry in
+            Color.clear.preference(key: FullPreviewHeightKey.self, value: geometry.size.height)
+          })
+      previewText(preview)
+        .lineLimit(Self.collapsedLineLimit)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(
+          GeometryReader { geometry in
+            Color.clear.preference(key: ClampedPreviewHeightKey.self, value: geometry.size.height)
+          })
+    }
+    .hidden()
+    .accessibilityHidden(true)
+  }
+}
+
+private struct FullPreviewHeightKey: PreferenceKey {
+  static let defaultValue: CGFloat = 0
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = max(value, nextValue())
+  }
+}
+
+private struct ClampedPreviewHeightKey: PreferenceKey {
+  static let defaultValue: CGFloat = 0
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = max(value, nextValue())
   }
 }
 

@@ -25,6 +25,9 @@ final class AgentTrackerModel: ObservableObject {
   /// Tracked by run ID rather than row index so the highlight follows a run across the refreshes
   /// that reorder and regroup rows every 0.75s.
   @Published var selectedRunID: String?
+  /// Runs whose prompt preview is expanded to show more of the opening prompt. Keyed by run ID so
+  /// the expansion follows a run across the refreshes that reorder and regroup rows.
+  @Published private(set) var expandedRunIDs: Set<String> = []
   /// Owned by the model rather than the view so keyboard navigation can walk the Recent rows only
   /// while they are actually on screen.
   @Published var recentExpanded = false {
@@ -96,6 +99,27 @@ final class AgentTrackerModel: ObservableObject {
     }
     let target = min(max(index + delta, 0), candidates.count - 1)
     self.selectedRunID = candidates[target].runID
+  }
+
+  func isExpanded(_ run: TrackedRun) -> Bool { expandedRunIDs.contains(run.runID) }
+
+  func toggleExpanded(_ run: TrackedRun) {
+    if expandedRunIDs.contains(run.runID) {
+      expandedRunIDs.remove(run.runID)
+    } else {
+      expandedRunIDs.insert(run.runID)
+    }
+  }
+
+  /// Expands the highlighted run's prompt preview, exactly as clicking its disclosure chevron does.
+  func expandSelection() {
+    guard let selectedRunID else { return }
+    expandedRunIDs.insert(selectedRunID)
+  }
+
+  func collapseSelection() {
+    guard let selectedRunID else { return }
+    expandedRunIDs.remove(selectedRunID)
   }
 
   /// Focuses the highlighted run, exactly as clicking its row does. Returns `false` when nothing is
@@ -178,6 +202,12 @@ final class AgentTrackerModel: ObservableObject {
       let runList = try store.runList(recentLimit: recentLimit)
       runs = runList.runs
       recentTotalCount = runList.recentCount
+      // Drop expansion state for runs that scrolled out of the list so the set cannot grow without
+      // bound over a long session.
+      let visibleIDs = Set(runList.runs.map(\.runID))
+      if !expandedRunIDs.isSubset(of: visibleIDs) {
+        expandedRunIDs.formIntersection(visibleIDs)
+      }
     } catch {
       errorMessage = error.localizedDescription
     }

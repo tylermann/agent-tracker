@@ -136,8 +136,8 @@ final class EventMapperTests: XCTestCase {
   }
 
   func testPromptPreviewIsBounded() {
-    let preview = EventMapper.promptPreview(String(repeating: "word ", count: 40))
-    XCTAssertEqual(preview.count, 120)
+    let preview = EventMapper.promptPreview(String(repeating: "word ", count: 120))
+    XCTAssertEqual(preview.count, 400)
     XCTAssertTrue(preview.hasSuffix("…"))
   }
 }
