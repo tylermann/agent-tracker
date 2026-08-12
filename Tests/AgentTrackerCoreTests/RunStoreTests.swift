@@ -90,6 +90,49 @@ final class RunStoreTests: XCTestCase {
     XCTAssertEqual(try store.activeRuns().map(\.runID), ["active"])
   }
 
+  func testActivityUpdatesDoNotReorderRunsWithinAVisibleCategory() throws {
+    let base = Date(timeIntervalSince1970: 1_700_000_000)
+    _ = try store.apply(
+      AgentEvent(occurredAt: base, runID: "earlier", harness: .codex, kind: .promptSubmitted))
+    _ = try store.apply(
+      AgentEvent(
+        occurredAt: base.addingTimeInterval(10), runID: "later", harness: .claude,
+        kind: .promptSubmitted))
+
+    XCTAssertEqual(try store.activeRuns().map(\.runID), ["later", "earlier"])
+
+    _ = try store.apply(
+      AgentEvent(
+        occurredAt: base.addingTimeInterval(20), runID: "earlier", harness: .codex,
+        kind: .activity))
+
+    XCTAssertEqual(try store.activeRuns().map(\.runID), ["later", "earlier"])
+  }
+
+  func testNeedsYouOrderStaysStableWhenStatusChangesWithinThatSection() throws {
+    let base = Date(timeIntervalSince1970: 1_700_000_000)
+    _ = try store.apply(
+      AgentEvent(
+        occurredAt: base, runID: "earlier", harness: .codex, kind: .attentionRequired))
+    _ = try store.apply(
+      AgentEvent(
+        occurredAt: base.addingTimeInterval(10), runID: "later", harness: .claude,
+        kind: .turnStopped))
+
+    XCTAssertEqual(
+      try store.activeRuns().filter { $0.status == .needsAttention || $0.status == .waiting }.map(\.runID),
+      ["later", "earlier"])
+
+    _ = try store.apply(
+      AgentEvent(
+        occurredAt: base.addingTimeInterval(20), runID: "earlier", harness: .codex,
+        kind: .turnStopped))
+
+    XCTAssertEqual(
+      try store.activeRuns().filter { $0.status == .needsAttention || $0.status == .waiting }.map(\.runID),
+      ["later", "earlier"])
+  }
+
   func testCursorHarnessWinsOverClaudeCompatibilityEvents() throws {
     let claude = AgentEvent(
       runID: "shared",

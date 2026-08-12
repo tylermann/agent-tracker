@@ -10,17 +10,20 @@ enum RunRowCodec {
     + "project_root, cwd, branch, prompt_preview, status, unread, "
     + "started_at, last_event_at, ended_at, exit_code"
 
-  /// Shared ORDER BY clause placing runs needing attention first, then by recency.
+  /// Shared ORDER BY clause matching the sidebar's visible sections. Within a section, a run's
+  /// position is based on its immutable start time rather than its activity time, so routine
+  /// updates cannot move a row while the user is trying to select it.
   static let statusPriorityOrder = """
     ORDER BY
         CASE status
             WHEN 'needsAttention' THEN 0
-            WHEN 'waiting' THEN 1
-            WHEN 'working' THEN 2
-            WHEN 'starting' THEN 3
-            ELSE 4
+            WHEN 'waiting' THEN 0
+            WHEN 'working' THEN 1
+            WHEN 'starting' THEN 2
+            ELSE 3
         END,
-        last_event_at DESC
+        started_at DESC,
+        run_id ASC
     """
 
   static let upsertSQL = """
