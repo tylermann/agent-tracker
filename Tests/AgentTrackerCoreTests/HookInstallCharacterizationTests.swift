@@ -156,6 +156,8 @@ final class HookInstallCharacterizationTests: XCTestCase {
       XCTAssertEqual(entries.count, 1, event)
       XCTAssertEqual(entries[0]["matcher"] as? String, "")
       let commands = try XCTUnwrap(entries[0]["hooks"] as? [[String: Any]], event)
+      let expectedTimeout = event == "SessionEnd" ? 3 : 5
+      XCTAssertEqual(commands[0]["timeout"] as? Int, expectedTimeout, event)
       XCTAssertEqual(
         commands[0]["command"] as? String,
         "'\(helperPath)' event --source agent-tracker --harness codex --event \(event)")

@@ -59,6 +59,10 @@ public struct HookInstallation: Sendable {
   public let style: Style
   /// Root-level keys ensured on the config file (e.g. Cursor's `"version": 1`).
   public let rootDefaults: [String: Int]
+  /// Seconds Codex/Claude/Cursor wait for a hook command. Codex clamps `SessionEnd` at 3s.
+  public let defaultTimeoutSeconds: Int
+  /// Per-event overrides of `defaultTimeoutSeconds`.
+  public let eventTimeouts: [String: Int]
   public let installReportLine: String
   public let removeReportLine: String
 
@@ -67,6 +71,8 @@ public struct HookInstallation: Sendable {
     events: [String],
     style: Style,
     rootDefaults: [String: Int] = [:],
+    defaultTimeoutSeconds: Int = 5,
+    eventTimeouts: [String: Int] = [:],
     installReportLine: String,
     removeReportLine: String
   ) {
@@ -74,8 +80,14 @@ public struct HookInstallation: Sendable {
     self.events = events
     self.style = style
     self.rootDefaults = rootDefaults
+    self.defaultTimeoutSeconds = defaultTimeoutSeconds
+    self.eventTimeouts = eventTimeouts
     self.installReportLine = installReportLine
     self.removeReportLine = removeReportLine
+  }
+
+  func timeoutSeconds(for event: String) -> Int {
+    eventTimeouts[event] ?? defaultTimeoutSeconds
   }
 }
 

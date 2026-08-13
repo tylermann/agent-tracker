@@ -20,16 +20,17 @@ struct HookConfigurator {
     for event in spec.hooks.events {
       var entries = hooks[event] as? [[String: Any]] ?? []
       let command = hookCommand(helperPath: helperPath, harness: spec.harness, event: event)
+      let timeout = spec.hooks.timeoutSeconds(for: event)
       switch spec.hooks.style {
       case .nestedMatcherGroups:
         entries = removingNestedManagedCommands(from: entries)
         entries.append([
           "matcher": "",
-          "hooks": [["type": "command", "command": command, "timeout": 5]],
+          "hooks": [["type": "command", "command": command, "timeout": timeout]],
         ])
       case .flatEntries:
         entries.removeAll(where: containsMarker)
-        entries.append(["command": command, "timeout": 5])
+        entries.append(["command": command, "timeout": timeout])
       }
       hooks[event] = entries
     }

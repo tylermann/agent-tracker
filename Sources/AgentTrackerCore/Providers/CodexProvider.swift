@@ -11,6 +11,8 @@ enum CodexProvider {
         "SessionStart", "UserPromptSubmit", "PermissionRequest", "PreToolUse", "Stop", "SessionEnd",
       ],
       style: .nestedMatcherGroups,
+      // Codex caps SessionEnd at 3s and warns if the configured timeout is higher.
+      eventTimeouts: ["SessionEnd": 3],
       installReportLine: "Installed Codex lifecycle hooks without changing config.toml or notify.",
       removeReportLine: "Removed Agent Tracker Codex hooks."
     ),
