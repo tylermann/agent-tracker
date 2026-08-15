@@ -49,6 +49,9 @@ final class AgentTrackerModel: ObservableObject {
   private var isStarted = false
   private var isRefreshing = false
   private var recentLimit = 0
+  /// Terminal-focus failures are feedback for a single click, not a persistent app state. Keep
+  /// their dismissal task separate from storage and integration errors, which remain visible.
+  private var transientErrorTask: Task<Void, Never>?
 
   init() {
     isDetached = UserDefaults.standard.bool(forKey: PreferenceKeys.panelDetached)
@@ -219,18 +222,27 @@ final class AgentTrackerModel: ObservableObject {
       return
     }
     guard let terminalID = run.ghosttyTerminalID else {
-      errorMessage = "This run is not bound to a Ghostty terminal."
+      showTransientError(
+        "This run has no Ghostty terminal link. It may have started before Agent Tracker was loaded."
+      )
       return
     }
     do {
       try GhosttyAutomation.focus(terminalID: terminalID)
       try store.markSeen(runID: run.runID)
+      dismissError()
       refresh()
     } catch {
       try? store.markUnavailable(runID: run.runID)
-      errorMessage = error.localizedDescription
+      showTransientError(error.localizedDescription)
       refresh()
     }
+  }
+
+  func dismissError() {
+    transientErrorTask?.cancel()
+    transientErrorTask = nil
+    errorMessage = nil
   }
 
   func clearHistory() {
@@ -247,6 +259,17 @@ final class AgentTrackerModel: ObservableObject {
     guard recentExpanded, hasMoreRecent else { return }
     recentLimit += Self.recentPageSize
     refresh()
+  }
+
+  private func showTransientError(_ message: String) {
+    transientErrorTask?.cancel()
+    errorMessage = message
+    transientErrorTask = Task { [weak self] in
+      try? await Task.sleep(nanoseconds: 6_000_000_000)
+      guard !Task.isCancelled, self?.errorMessage == message else { return }
+      self?.errorMessage = nil
+      self?.transientErrorTask = nil
+    }
   }
 
   private func reconcileProcesses() throws {

@@ -75,12 +75,24 @@ struct SidebarView: View {
       }
       if let error = model.errorMessage {
         Divider()
-        Text(error)
-          .font(SidebarTypography.caption)
-          .foregroundStyle(.red)
-          .lineLimit(2)
-          .padding(8)
-          .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(alignment: .top, spacing: 6) {
+          Text(error)
+            .font(SidebarTypography.caption)
+            .foregroundStyle(.red)
+            .lineLimit(2)
+          Spacer(minLength: 0)
+          Button(action: model.dismissError) {
+            Image(systemName: "xmark")
+              .font(SidebarTypography.caption2.weight(.semibold))
+              .frame(width: 16, height: 16)
+              .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .foregroundStyle(.secondary)
+          .accessibilityLabel("Dismiss error")
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
     .frame(minWidth: 280, idealWidth: 320, minHeight: 360)
@@ -322,6 +334,9 @@ private struct RunRow: View {
         HStack(spacing: 5) {
           if let branch = run.branch, !branch.isEmpty {
             Label(branch, systemImage: "arrow.triangle.branch")
+          }
+          if run.ghosttyTerminalID == nil {
+            Label("No terminal link", systemImage: "link.badge.minus")
           }
           Text(run.lastEventAt, style: .relative)
           // Leave room for the disclosure chevron overlaid on this corner of the row.
