@@ -61,7 +61,7 @@ enum ClaudeProvider {
     #if canImport(Security)
       for service in ["Claude Code-credentials", "claude-code-credentials"] {
         if let data = CredentialReading.keychainPassword(
-          service: service, allowPrompt: allowKeychainPrompt),
+          service: service, allowPrompt: allowKeychainPrompt, securityToolFallback: true),
           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let oauth = root["claudeAiOauth"] as? [String: Any],
           let token = CredentialReading.nonempty(oauth["accessToken"])

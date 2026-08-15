@@ -47,6 +47,12 @@ time. Subsequent builds signed with the same identity and bundle identifier reta
 `make install` stops a running Agent Tracker instance before replacing its bundle, then relaunches
 it, so the running process and on-disk signature cannot get out of sync.
 
+Stable signing is not enough for the Claude Code credential item: Claude Code resets that item's
+keychain partition list on every OAuth token refresh, which revokes a direct grant several times a
+day regardless of how this app is signed. Agent Tracker therefore falls back to reading that item
+through `/usr/bin/security`, whose authorization matches the partition Claude Code stamps and so
+survives every rotation.
+
 On first launch:
 
 1. Grant Accessibility access so the panel can follow Ghostty windows.

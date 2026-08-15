@@ -3,8 +3,9 @@ import XCTest
 @testable import AgentTrackerCore
 
 /// File-based credential paths only. Every test must return from a credential file BEFORE the
-/// reader falls through to its keychain lookup: `SecItemCopyMatching` targets the real login
-/// keychain by service name, and the resulting ACL password prompt is not suppressed by
+/// reader falls through to its keychain lookup: the lookup targets the real login keychain by
+/// service name, so it would read the developer's actual credentials, and the Claude reader's
+/// /usr/bin/security fallback can show an ACL password prompt even with
 /// `allowKeychainPrompt: false`.
 final class CredentialReaderTests: XCTestCase {
   private var home: URL!

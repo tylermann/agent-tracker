@@ -69,7 +69,7 @@ struct SettingsView: View {
       Section("Usage meters") {
         Toggle("Show Claude, Codex, and Cursor usage", isOn: $model.usageMetersEnabled)
         Text(
-          "When enabled, Agent Tracker polls each provider about every three minutes using that product's existing local sign-in. Automatic polls never open Keychain dialogs; click the refresh button in the sidebar to authorize access when needed. Credentials are read once per launch, kept only in memory, sent only to the matching provider, and never stored by Agent Tracker."
+          "When enabled, Agent Tracker polls each provider about every three minutes using that product's existing local sign-in. macOS may ask once to authorize keychain access; after that, polls stay silent. Credentials are read once per launch, kept only in memory, sent only to the matching provider, and never stored by Agent Tracker."
         )
         .font(.caption)
         .foregroundStyle(.secondary)
