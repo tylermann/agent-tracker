@@ -42,9 +42,9 @@ Sessions are launched with specific models (via aliases like `fable`, `opus`,
 
 - Capture and persist the model from hook payloads, CLI flags in the zsh wrapper, and live context
   telemetry, including model changes during a session.
-- Keep the provider logo but replace its row label with a compact friendly model name; fall back to
-  the provider name when the model is not yet knowable. This applies to active and Recent rows,
-  while usage meters stay grouped under provider names.
+- Keep the provider logo and label each row with both the provider and a compact friendly model
+  name; fall back to the provider name alone when the model is not yet knowable. This applies to
+  active and Recent rows, while usage meters stay grouped under provider names.
 - Stored model per session also enables attributing usage-meter burn to specific models later.
 
 ## 5. Personal attention-latency stats

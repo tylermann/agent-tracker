@@ -21,7 +21,7 @@ struct SidebarView: View {
             LazyVStack(alignment: .leading, spacing: 14) {
               runSection("Needs Me", tint: .orange, runs: model.needsYou)
               runSection("Working", tint: .blue, runs: model.working)
-              runSection("Idle", tint: .gray, runs: model.idle)
+              runSection("Starting", tint: .gray, runs: model.idle)
               if model.recentTotalCount > 0 {
                 VStack(alignment: .leading, spacing: 6) {
                   Button {
@@ -340,7 +340,7 @@ struct SidebarView: View {
 private struct ProviderLabel: View {
   let harness: Harness
   let font: Font
-  var title: String? = nil
+  var detail: String? = nil
 
   var body: some View {
     HStack(spacing: 5) {
@@ -349,8 +349,16 @@ private struct ProviderLabel: View {
         .interpolation(.high)
         .frame(width: 17, height: 17)
         .accessibilityHidden(true)
-      Text(title ?? harness.displayName)
-        .font(font)
+      HStack(spacing: 4) {
+        Text(harness.displayName)
+        if let detail {
+          Text("·")
+            .foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
+          Text(detail)
+        }
+      }
+      .font(font)
     }
   }
 }
@@ -396,12 +404,16 @@ private struct RunRow: View {
           ProviderLabel(
             harness: run.harness,
             font: SidebarTypography.subheadline.weight(.bold),
-            title: modelLabel
+            detail: modelLabel
           )
-          Text(run.status.displayName)
-            .font(SidebarTypography.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
+          // Active rows already sit beneath a section naming their status. Recent combines ended
+          // and unavailable runs, so those rows still need an explicit status to distinguish them.
+          if isFinished {
+            Text(run.status.displayName)
+              .font(SidebarTypography.caption)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+          }
           if let timing = RunPresentation.turnTiming(run) {
             Text(timing.label)
               .font(SidebarTypography.caption2)
