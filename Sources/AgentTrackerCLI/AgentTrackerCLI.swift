@@ -8,6 +8,7 @@ enum AgentTrackerCLI {
     [
       WrapCommand.self,
       EventCommand.self,
+      CursorContextCommand.self,
       InstallCommand.self,
       UninstallCommand.self,
       DoctorCommand.self,

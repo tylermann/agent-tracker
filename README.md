@@ -8,6 +8,7 @@ Agent Tracker is a small native macOS sidecar for monitoring Claude Code, Codex 
 - Tracks tabs, splits, and windows independently, including multiple agents in the same repository.
 - Subtly highlights and reveals the run mapped to Ghostty's currently focused terminal.
 - Uses each harness's lifecycle hooks instead of scraping terminal output.
+- Shows live context-window occupancy for Claude, Codex, and Cursor sessions.
 - Shows a menu-bar unread count and sends actionable macOS notifications.
 - Jumps to the next agent needing attention with `⌘⇧\`; `⌘⇧'` opens the sidebar for keyboard navigation.
 - Stores only local run metadata and a 120-character first-prompt preview; it stores no transcripts.
@@ -72,7 +73,7 @@ credentials are read once per app launch and retained only in memory, so backgro
 repeatedly access Keychain. Automatic polls do not show Keychain dialogs; use the sidebar refresh
 button to explicitly authorize access when needed.
 
-The integration installer creates timestamped backups before changing existing configuration. It adds one marked block to `~/.zshrc`, writes a managed `~/.config/agent-tracker/shell.zsh`, and merges marked hook commands into the harness settings. Existing Codex `notify` configuration is not touched.
+The integration installer creates timestamped backups before changing existing configuration. It adds one marked block to `~/.zshrc`, writes a managed `~/.config/agent-tracker/shell.zsh`, and merges marked hook commands into the harness settings. Existing Codex `notify` configuration is not touched. For Cursor, it installs a local status-line callback when that slot is unused; an existing custom status line is preserved, with turn-end hook data used as a less precise fallback.
 
 ## CLI
 
@@ -94,7 +95,7 @@ The generated zsh functions invoke `wrap` transparently under the familiar `clau
 - `AgentTrackerCore`: normalized events, inbox, SQLite reducer, Ghostty automation, and integration management.
 - `agent-tracker`: hook receiver, transparent process wrapper, diagnostics, and installer CLI.
 - `AgentTracker`: SwiftUI/AppKit menu-bar app, attached panel, notifications, and settings.
-- Hook events are written atomically to an inbox. The app is the only SQLite writer, so events survive app restarts without requiring a resident socket daemon.
+- Hook events and Cursor context snapshots are written atomically. The app is the only SQLite writer, so events survive app restarts without requiring a resident socket daemon.
 
 ## Current boundaries
 

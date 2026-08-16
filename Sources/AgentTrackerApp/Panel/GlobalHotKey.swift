@@ -111,8 +111,11 @@ extension GlobalHotKey {
     static let displayModifiers: NSEvent.ModifierFlags = [.command, .shift]
   }
 
-  static let shortcutsHelp = """
-    ⌘⇧'  Open sidebar and navigate agents
-    ⌘⇧\\  Jump to next agent that needs you
-    """
+  static let shortcutRows: [(keys: String, description: String)] = [
+    ("⌘\u{2009}+\u{2009}⇧\u{2009}+\u{2009}'", "Open sidebar and navigate agents"),
+    ("⌘\u{2009}+\u{2009}⇧\u{2009}+\u{2009}\\", "Jump to next agent that needs you"),
+  ]
+
+  static let shortcutsHelp = shortcutRows.map { "\($0.keys)  \($0.description)" }.joined(
+    separator: "\n")
 }

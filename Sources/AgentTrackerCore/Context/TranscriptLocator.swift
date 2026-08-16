@@ -20,7 +20,8 @@ enum TranscriptLocator {
     case .codex:
       return codexURL(sessionID: sessionID, home: home, fileManager: fileManager)
     case .cursor:
-      // Cursor stores chats in a SQLite blob store that records no token counts.
+      // Recent Cursor versions write JSONL transcripts too, but those still omit token counts.
+      // Live Cursor context arrives through its status-line callback and bypasses this locator.
       return nil
     }
   }

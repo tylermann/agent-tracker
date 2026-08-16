@@ -87,6 +87,29 @@ final class IntegrationManagerTests: XCTestCase {
     XCTAssertFalse(zshrc.contains("agent-tracker"))
   }
 
+  func testExistingCursorStatusLineIsPreserved() throws {
+    let cursor = home.appendingPathComponent(".cursor", isDirectory: true)
+    try FileManager.default.createDirectory(at: cursor, withIntermediateDirectories: true)
+    let original =
+      #"{"display":{"mode":"zen"},"statusLine":{"type":"command","command":"my-status --color","padding":3}}"#
+    try Data(original.utf8).write(to: cursor.appendingPathComponent("cli-config.json"))
+
+    let report = try makeManager().install(
+      helperPath: "/Applications/Agent Tracker.app/Contents/MacOS/agent-tracker")
+
+    let config = try json(cursor.appendingPathComponent("cli-config.json"))
+    XCTAssertEqual(
+      (config["statusLine"] as? [String: Any])?["command"] as? String,
+      "my-status --color")
+    XCTAssertTrue(report.lines.contains(where: { $0.contains("preserved the existing Cursor") }))
+
+    _ = try makeManager().uninstall()
+    let afterUninstall = try json(cursor.appendingPathComponent("cli-config.json"))
+    XCTAssertEqual(
+      (afterUninstall["statusLine"] as? [String: Any])?["command"] as? String,
+      "my-status --color")
+  }
+
   private func json(_ url: URL) throws -> [String: Any] {
     try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any] ?? [:]
   }

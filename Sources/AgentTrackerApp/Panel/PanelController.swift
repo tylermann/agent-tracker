@@ -41,6 +41,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     panel.standardWindowButton(.zoomButton)?.isHidden = true
     panel.isFloatingPanel = false
     panel.becomesKeyOnlyIfNeeded = true
+    // Ghostty stays frontmost, so this accessory app is inactive whenever the user is hovering
+    // the sidebar. Without this, every SwiftUI `.help()` tooltip is suppressed.
+    panel.allowsToolTipsWhenApplicationIsInactive = true
     panel.level = .normal
     panel.hidesOnDeactivate = false
     panel.isReleasedWhenClosed = false

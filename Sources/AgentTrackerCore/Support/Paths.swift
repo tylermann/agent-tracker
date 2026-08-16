@@ -20,6 +20,9 @@ public struct AgentTrackerPaths: Sendable {
   }
 
   public var inbox: URL { root.appendingPathComponent("events/inbox", isDirectory: true) }
+  public var contextSnapshots: URL {
+    root.appendingPathComponent("context", isDirectory: true)
+  }
   public var database: URL { root.appendingPathComponent("runs.sqlite3") }
 
   public func prepare() throws {
@@ -28,7 +31,14 @@ public struct AgentTrackerPaths: Sendable {
       withIntermediateDirectories: true,
       attributes: [.posixPermissions: 0o700]
     )
+    try FileManager.default.createDirectory(
+      at: contextSnapshots,
+      withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700]
+    )
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: inbox.path)
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o700], ofItemAtPath: contextSnapshots.path)
   }
 }

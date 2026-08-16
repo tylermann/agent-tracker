@@ -20,6 +20,7 @@ public final class IntegrationManager: @unchecked Sendable {
   private let executableResolver: (@Sendable (Harness) -> String?)?
   private let shell: ShellIntegration
   private let hooks: HookConfigurator
+  private let cursorStatusLine: CursorStatusLineConfigurator
 
   public init(
     home: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -32,6 +33,8 @@ public final class IntegrationManager: @unchecked Sendable {
     shell = ShellIntegration(home: home, fileManager: fileManager)
     hooks = HookConfigurator(
       home: home, fileManager: fileManager, marker: "--source agent-tracker")
+    cursorStatusLine = CursorStatusLineConfigurator(
+      home: home, fileManager: fileManager, marker: "cursor-context --source agent-tracker")
   }
 
   public func install(helperPath: String) throws -> IntegrationReport {
@@ -49,6 +52,10 @@ public final class IntegrationManager: @unchecked Sendable {
       try hooks.merge(spec, helperPath: helperPath)
       report.lines.append(spec.hooks.installReportLine)
     }
+    if try cursorStatusLine.install(helperPath: helperPath) == .skippedExisting {
+      report.lines.append(
+        "Warning: preserved the existing Cursor status line; context will update at turn end.")
+    }
     report.lines.append("Open a new shell or run: source ~/.zshrc")
     return report
   }
@@ -61,6 +68,7 @@ public final class IntegrationManager: @unchecked Sendable {
       try hooks.remove(spec)
       report.lines.append(spec.hooks.removeReportLine)
     }
+    try cursorStatusLine.uninstall()
     return report
   }
 

@@ -2,10 +2,10 @@ import Foundation
 
 /// How full a session's context window was as of the last model turn recorded in its transcript.
 ///
-/// Harnesses do not report this over any API, so it is derived from the transcript each harness
-/// already writes to disk. Only the two numbers survive the sampling — transcript content is read
-/// and discarded, never stored.
-public struct SessionContext: Equatable, Sendable {
+/// Claude and Codex are derived from the transcript each harness writes to disk. Cursor supplies
+/// the same two numbers through a local status-line callback. Transcript and callback payload
+/// content is discarded; only these totals are retained.
+public struct SessionContext: Codable, Equatable, Sendable {
   public var usedTokens: Int
   public var windowTokens: Int
   /// The model that produced the sampled turn, when the transcript names one. Kept for the

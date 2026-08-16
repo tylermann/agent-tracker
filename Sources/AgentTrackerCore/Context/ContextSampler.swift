@@ -1,10 +1,10 @@
 import Foundation
 
-/// Samples each tracked run's context occupancy from its harness transcript.
+/// Samples each tracked run's context occupancy from its transcript or local callback snapshot.
 ///
-/// Built for a caller that ticks often: a run is re-read only when its transcript's size or
-/// modification date has changed, so a steady-state refresh costs one `stat` per row. Transcript
-/// bytes are parsed and dropped — only the resulting token counts are kept.
+/// Built for a caller that ticks often: a run is re-read only when its source file's size or
+/// modification date has changed, so a steady-state refresh costs one `stat` per row. Source bytes
+/// are parsed and dropped — only the resulting token counts are kept.
 public final class ContextSampler {
   /// Transcripts are appended to, so the answer is near the end. Reading a window rather than the
   /// file keeps the cost flat as a session grows into tens of megabytes.
@@ -12,8 +12,8 @@ public final class ContextSampler {
   /// One assistant turn can be followed by megabytes of tool results, pushing the line we need
   /// past the first window. Escalate once, then give up rather than read an unbounded amount.
   private static let maximumTailBytes = 4 * 1024 * 1024
-  /// A session whose transcript cannot be found yet — Cursor always, Codex until its first write —
-  /// must not re-scan the archive on every tick.
+  /// A transcript-backed session that has not written its archive yet must not re-scan it on every
+  /// tick.
   private static let relocateInterval: TimeInterval = 15
 
   private struct Entry {
@@ -26,19 +26,23 @@ public final class ContextSampler {
 
   private let home: URL
   private let fileManager: FileManager
+  private let cursorSnapshots: CursorContextSnapshotStore?
   private var entries: [String: Entry] = [:]
 
   public init(
     home: URL = FileManager.default.homeDirectoryForCurrentUser,
-    fileManager: FileManager = .default
+    fileManager: FileManager = .default,
+    paths: AgentTrackerPaths = AgentTrackerPaths()
   ) {
     self.home = home
     self.fileManager = fileManager
+    cursorSnapshots = try? CursorContextSnapshotStore(paths: paths, fileManager: fileManager)
   }
 
   /// The run's context occupancy, or nil when the harness records none, the transcript has not
   /// been located, or no model turn has been served yet.
   public func sample(_ run: TrackedRun, now: Date = Date()) -> SessionContext? {
+    if run.harness == .cursor { return sampleCursor(run) }
     guard let sessionID = run.harnessSessionID, !sessionID.isEmpty else { return nil }
     var entry = entries[run.runID] ?? Entry(url: nil, locatedAt: .distantPast)
 
@@ -68,6 +72,30 @@ public final class ContextSampler {
     entry.modifiedAt = modifiedAt
     if let context = readContext(harness: run.harness, url: url) {
       entry.context = context
+    }
+    entries[run.runID] = entry
+    return entry.context
+  }
+
+  /// Cursor reports context through a configured status-line callback rather than its transcript.
+  /// The URL is deterministic, so a not-yet-created snapshot can be retried on every cheap refresh
+  /// instead of waiting for the transcript archive's relocation interval.
+  private func sampleCursor(_ run: TrackedRun) -> SessionContext? {
+    guard let cursorSnapshots else { return nil }
+    var entry = entries[run.runID] ?? Entry(url: nil, locatedAt: .distantPast)
+    let url = cursorSnapshots.url(forRunID: run.runID)
+    entry.url = url
+    guard let attributes = try? fileManager.attributesOfItem(atPath: url.path) else {
+      entries[run.runID] = entry
+      return entry.context
+    }
+    let size = (attributes[.size] as? NSNumber)?.intValue
+    let modifiedAt = attributes[.modificationDate] as? Date
+    guard size != entry.size || modifiedAt != entry.modifiedAt else { return entry.context }
+    entry.size = size
+    entry.modifiedAt = modifiedAt
+    if let snapshot = try? cursorSnapshots.read(forRunID: run.runID) {
+      entry.context = snapshot.context
     }
     entries[run.runID] = entry
     return entry.context

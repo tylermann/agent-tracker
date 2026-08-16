@@ -189,6 +189,29 @@ final class HookInstallCharacterizationTests: XCTestCase {
     }
   }
 
+  func testCursorStatusLineContextBridgeStructure() throws {
+    _ = try manager().install(helperPath: helperPath)
+    let root = try json(home.appendingPathComponent(".cursor/cli-config.json"))
+    let statusLine = try XCTUnwrap(root["statusLine"] as? [String: Any])
+    XCTAssertEqual(statusLine["type"] as? String, "command")
+    XCTAssertEqual(statusLine["padding"] as? Int, 0)
+    XCTAssertEqual(
+      statusLine["command"] as? String,
+      "'\(helperPath)' cursor-context --source agent-tracker")
+
+    _ = try manager().uninstall()
+    let removed = try json(home.appendingPathComponent(".cursor/cli-config.json"))
+    XCTAssertNil(removed["statusLine"])
+  }
+
+  func testCursorStatusLineInstallIsByteIdenticalOnRepair() throws {
+    _ = try manager().install(helperPath: helperPath)
+    let url = home.appendingPathComponent(".cursor/cli-config.json")
+    let first = try Data(contentsOf: url)
+    _ = try manager().install(helperPath: helperPath)
+    XCTAssertEqual(try Data(contentsOf: url), first)
+  }
+
   func testReinstallProducesByteIdenticalHookFiles() throws {
     _ = try manager().install(helperPath: helperPath)
     let paths = [".claude/settings.json", ".codex/hooks.json", ".cursor/hooks.json"]

@@ -4,6 +4,10 @@ import SwiftUI
 
 struct SidebarView: View {
   @ObservedObject var model: AgentTrackerModel
+  @State private var shortcutsPinned = false
+  @State private var shortcutsHovering = false
+
+  private var showingShortcuts: Bool { shortcutsPinned || shortcutsHovering }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -116,6 +120,13 @@ struct SidebarView: View {
     // show window controls. Let the header use that space so it sits close to the panel's top edge.
     .ignoresSafeArea(.container, edges: .top)
     .background(.ultraThinMaterial)
+    .overlay(alignment: .topTrailing) {
+      if showingShortcuts {
+        shortcutsHelpCard
+          .padding(.top, 36)
+          .padding(.trailing, 8)
+      }
+    }
   }
 
   private var usageMeters: some View {
@@ -231,16 +242,55 @@ struct SidebarView: View {
           .background(.orange, in: Capsule())
           .foregroundStyle(.white)
       }
-      Image(systemName: "info.circle")
-        .font(SidebarTypography.subheadline)
-        .foregroundStyle(.secondary)
-        .frame(width: 20, height: 20)
-        .contentShape(Rectangle())
-        .help(GlobalHotKey.shortcutsHelp)
-        .accessibilityLabel("Keyboard shortcuts")
-        .accessibilityHint(GlobalHotKey.shortcutsHelp)
+      Button {
+        shortcutsPinned.toggle()
+      } label: {
+        Image(systemName: shortcutsPinned ? "info.circle.fill" : "info.circle")
+          .font(SidebarTypography.subheadline)
+          .foregroundStyle(.secondary)
+          .frame(width: 20, height: 20)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .background {
+        AlwaysActiveHover { shortcutsHovering = $0 }
+      }
+      .accessibilityLabel("Keyboard shortcuts")
+      .accessibilityHint(GlobalHotKey.shortcutsHelp)
+      .accessibilityValue(showingShortcuts ? "Shown" : "Hidden")
     }
     .padding(12)
+  }
+
+  /// Shown from the header info button. Native `.help()` tooltips do not appear on this
+  /// non-activating panel while another app is frontmost, so the shortcuts live in an overlay
+  /// driven by click and an always-active tracking area.
+  private var shortcutsHelpCard: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      ForEach(GlobalHotKey.shortcutRows, id: \.keys) { row in
+        shortcutRow(row.keys, row.description)
+      }
+    }
+    .padding(10)
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+    .overlay {
+      RoundedRectangle(cornerRadius: 8)
+        .strokeBorder(Color.primary.opacity(0.08))
+    }
+    .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+    .fixedSize()
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(GlobalHotKey.shortcutsHelp)
+  }
+
+  private func shortcutRow(_ keys: String, _ description: String) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
+      Text(keys)
+        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+        .foregroundStyle(.secondary)
+      Text(description)
+        .font(SidebarTypography.caption)
+    }
   }
 
   private var emptyState: some View {
@@ -566,6 +616,42 @@ private struct ClampedPreviewHeightKey: PreferenceKey {
   static let defaultValue: CGFloat = 0
   static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
     value = max(value, nextValue())
+  }
+}
+
+/// SwiftUI `onHover` and `.help()` both go quiet when this accessory panel is not key.
+/// A tracking area with `.activeAlways` still fires while Ghostty is frontmost.
+private struct AlwaysActiveHover: NSViewRepresentable {
+  var onHover: (Bool) -> Void
+
+  func makeNSView(context: Context) -> TrackingView {
+    let view = TrackingView()
+    view.onHover = onHover
+    return view
+  }
+
+  func updateNSView(_ nsView: TrackingView, context: Context) {
+    nsView.onHover = onHover
+  }
+
+  final class TrackingView: NSView {
+    var onHover: ((Bool) -> Void)?
+    private var trackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+      super.updateTrackingAreas()
+      if let trackingArea { removeTrackingArea(trackingArea) }
+      let area = NSTrackingArea(
+        rect: .zero,
+        options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+        owner: self
+      )
+      addTrackingArea(area)
+      trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHover?(true) }
+    override func mouseExited(with event: NSEvent) { onHover?(false) }
   }
 }
 

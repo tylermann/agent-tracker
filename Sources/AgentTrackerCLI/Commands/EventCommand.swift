@@ -21,6 +21,14 @@ enum EventCommand: Command {
       environment: ProcessInfo.processInfo.environment
     )
     environment = spec.enrichHookEnvironment(eventName, environment)
+    if harness == .cursor, eventName.caseInsensitiveCompare("stop") == .orderedSame,
+      let snapshot = try? CursorContextPayloadParser.stopHook(
+        payload, environment: environment)
+    {
+      // Context telemetry must never make Cursor's lifecycle hook fail. The normal event below is
+      // still delivered even if the optional fallback snapshot cannot be written.
+      try? CursorContextSnapshotStore().write(snapshot)
+    }
     if let event = try EventMapper.map(
       harness: harness,
       eventName: eventName,
