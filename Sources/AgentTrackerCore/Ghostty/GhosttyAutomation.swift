@@ -150,9 +150,15 @@ public enum GhosttyAutomation {
   }
 
   public static func isFocused(terminalID: String) -> Bool {
-    guard (try? focusedTerminalID()) == terminalID,
-      let frontmost = NSWorkspace.shared.frontmostApplication
-    else { return false }
+    guard isFrontmost, (try? focusedTerminalID()) == terminalID else { return false }
+    return true
+  }
+
+  /// Reading Ghostty's front window while another app is active would make the sidebar highlight a
+  /// terminal the user is not actually looking at. Keep that frontmost check shared with callers
+  /// that resolve the current terminal once and map it to a tracked run.
+  public static var isFrontmost: Bool {
+    guard let frontmost = NSWorkspace.shared.frontmostApplication else { return false }
     return frontmost.bundleIdentifier == "com.mitchellh.ghostty"
       || frontmost.localizedName == "Ghostty"
   }

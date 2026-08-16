@@ -120,7 +120,7 @@ final class RunStoreTests: XCTestCase {
         kind: .turnStopped))
 
     XCTAssertEqual(
-      try store.activeRuns().filter { $0.status == .needsAttention || $0.status == .waiting }.map(
+      try store.activeRuns().filter { $0.status.needsYou }.map(
         \.runID),
       ["later", "earlier"])
 
@@ -130,7 +130,7 @@ final class RunStoreTests: XCTestCase {
         kind: .turnStopped))
 
     XCTAssertEqual(
-      try store.activeRuns().filter { $0.status == .needsAttention || $0.status == .waiting }.map(
+      try store.activeRuns().filter { $0.status.needsYou }.map(
         \.runID),
       ["later", "earlier"])
   }

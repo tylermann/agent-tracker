@@ -86,11 +86,15 @@ public enum RunStatus: String, Codable, CaseIterable, Sendable {
     switch self {
     case .starting: "Starting"
     case .working: "Working"
-    case .needsAttention: "Needs attention"
-    case .waiting: "Waiting"
+    case .needsAttention, .waiting: "Needs me"
     case .ended: "Ended"
     case .unavailable: "Unavailable"
     }
+  }
+
+  /// Permission prompts and finished turns are the same inbox: the agent is blocked on you.
+  public var needsYou: Bool {
+    self == .needsAttention || self == .waiting
   }
 }
 
@@ -111,6 +115,14 @@ public struct TrackedRun: Identifiable, Codable, Equatable, Sendable {
   public var unreadAttention: Bool
   public var startedAt: Date
   public var lastEventAt: Date
+  /// When the run last entered `.working`. Tool-call activity does not push it forward, so it
+  /// measures the whole stretch the agent has been running since you last interacted with it.
+  /// Nil whenever the run is not currently working.
+  public var workingSince: Date?
+  /// How long the most recently finished working stretch lasted. Frozen at the moment the run came
+  /// back to you, so a blocked row answers "how long did it run?" rather than "how long has it
+  /// been sitting?".
+  public var lastTurnDuration: TimeInterval?
   public var endedAt: Date?
   public var exitCode: Int32?
 
@@ -130,6 +142,8 @@ public struct TrackedRun: Identifiable, Codable, Equatable, Sendable {
     unreadAttention: Bool = false,
     startedAt: Date = Date(),
     lastEventAt: Date = Date(),
+    workingSince: Date? = nil,
+    lastTurnDuration: TimeInterval? = nil,
     endedAt: Date? = nil,
     exitCode: Int32? = nil
   ) {
@@ -148,6 +162,8 @@ public struct TrackedRun: Identifiable, Codable, Equatable, Sendable {
     self.unreadAttention = unreadAttention
     self.startedAt = startedAt
     self.lastEventAt = lastEventAt
+    self.workingSince = workingSince
+    self.lastTurnDuration = lastTurnDuration
     self.endedAt = endedAt
     self.exitCode = exitCode
   }

@@ -71,6 +71,7 @@ final class PanelController: NSObject, NSWindowDelegate {
       else { return }
       Task { @MainActor in
         self?.updatePosition(forceOrderFront: true)
+        self?.model.refreshFocusedRun()
       }
     }
     screenChangeObserver = NotificationCenter.default.addObserver(
@@ -88,10 +89,14 @@ final class PanelController: NSObject, NSWindowDelegate {
       Task { @MainActor in self?.reanchorAfterDisplayChange() }
     }
     timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
-      Task { @MainActor in self?.updatePosition() }
+      Task { @MainActor in
+        self?.updatePosition()
+        self?.model.refreshFocusedRun()
+      }
     }
     panel.orderFrontRegardless()
     updatePosition()
+    model.refreshFocusedRun()
   }
 
   func show() {

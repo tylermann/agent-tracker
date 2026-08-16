@@ -8,7 +8,7 @@ enum RunRowCodec {
   static let columns =
     "run_id, harness, harness_session_id, terminal_id, executable, pid, "
     + "project_root, cwd, branch, git_insertions, git_deletions, prompt_preview, status, unread, "
-    + "started_at, last_event_at, ended_at, exit_code"
+    + "started_at, last_event_at, ended_at, exit_code, working_since, last_turn_duration"
 
   /// Shared ORDER BY clause matching the sidebar's visible sections. Within a section, a run's
   /// position is based on its immutable start time rather than its activity time, so routine
@@ -27,7 +27,7 @@ enum RunRowCodec {
     """
 
   static let upsertSQL = """
-    INSERT INTO runs(\(columns)) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO runs(\(columns)) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(run_id) DO UPDATE SET
         harness=excluded.harness, harness_session_id=excluded.harness_session_id,
         terminal_id=excluded.terminal_id, executable=excluded.executable, pid=excluded.pid,
@@ -35,7 +35,8 @@ enum RunRowCodec {
         git_insertions=excluded.git_insertions, git_deletions=excluded.git_deletions,
         prompt_preview=excluded.prompt_preview, status=excluded.status, unread=excluded.unread,
         started_at=excluded.started_at, last_event_at=excluded.last_event_at,
-        ended_at=excluded.ended_at, exit_code=excluded.exit_code
+        ended_at=excluded.ended_at, exit_code=excluded.exit_code,
+        working_since=excluded.working_since, last_turn_duration=excluded.last_turn_duration
     """
 
   static func bindings(for run: TrackedRun) -> [SQLiteValue] {
@@ -49,6 +50,8 @@ enum RunRowCodec {
       .double(run.startedAt.timeIntervalSince1970),
       .double(run.lastEventAt.timeIntervalSince1970),
       optional(run.endedAt), optional(run.exitCode),
+      optional(run.workingSince),
+      run.lastTurnDuration.map { SQLiteValue.double($0) } ?? .null,
     ]
   }
 
@@ -69,6 +72,8 @@ enum RunRowCodec {
       unreadAttention: sqlite3_column_int(statement, 13) != 0,
       startedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 14)),
       lastEventAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 15)),
+      workingSince: nullableDate(statement, 18),
+      lastTurnDuration: nullableDouble(statement, 19),
       endedAt: nullableDate(statement, 16),
       exitCode: nullableInt(statement, 17)
     )
@@ -93,6 +98,11 @@ enum RunRowCodec {
   private static func nullableInt(_ statement: OpaquePointer, _ index: Int32) -> Int32? {
     sqlite3_column_type(statement, index) == SQLITE_NULL
       ? nil : sqlite3_column_int(statement, index)
+  }
+
+  private static func nullableDouble(_ statement: OpaquePointer, _ index: Int32) -> Double? {
+    sqlite3_column_type(statement, index) == SQLITE_NULL
+      ? nil : sqlite3_column_double(statement, index)
   }
 
   private static func nullableDate(_ statement: OpaquePointer, _ index: Int32) -> Date? {

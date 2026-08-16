@@ -24,7 +24,7 @@ A small file icon and dirty-file count sit next to the existing branch on each
 row. They refresh when a run needs attention, is waiting, or has ended — not on
 every activity tick, and not in notifications.
 
-## 3. Global hotkey: jump to next waiting agent
+## 3. Global hotkey: jump to next waiting agent — implemented
 
 The app already jumps to Ghostty surfaces; make that keyboard-driven:
 
@@ -32,6 +32,8 @@ The app already jumps to Ghostty surfaces; make that keyboard-driven:
   "waiting for feedback" or "asking for permission" state.
 - Pressing it repeatedly cycles through all waiting agents, turning the
   sidebar into a queue to drain without mouse or scanning.
+- `⌘⇧\` runs the action, and the sidebar header's info icon documents it
+  alongside the existing `⌘⇧'` keyboard-navigation shortcut.
 
 ## 4. Model tag on each row
 

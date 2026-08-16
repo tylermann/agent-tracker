@@ -12,6 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   private var settingsWindow: NSWindow?
   private var cancellable: AnyCancellable?
   private var focusSidebarHotKey: GlobalHotKey?
+  private var nextNeedsYouHotKey: GlobalHotKey?
+  private var lastFocusedNeedsYouRunID: String?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
@@ -31,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
   func applicationWillTerminate(_ notification: Notification) {
     focusSidebarHotKey?.unregister()
+    nextNeedsYouHotKey?.unregister()
     model.stop()
   }
 
@@ -43,6 +46,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
     if focusSidebarHotKey == nil {
       model.errorMessage = "Another app already uses ⌘⇧' — the sidebar shortcut is unavailable."
+    }
+
+    nextNeedsYouHotKey = GlobalHotKey(
+      keyCode: GlobalHotKey.NextNeedsYou.keyCode,
+      modifiers: GlobalHotKey.NextNeedsYou.modifiers
+    ) { [weak self] in
+      self?.focusNextNeedsYouRun()
+    }
+    if nextNeedsYouHotKey == nil {
+      model.errorMessage =
+        "Another app already uses ⌘⇧\\ — the next-agent shortcut is unavailable."
     }
   }
 
@@ -67,6 +81,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     show.keyEquivalent = GlobalHotKey.FocusSidebar.displayKeyEquivalent
     show.keyEquivalentModifierMask = GlobalHotKey.FocusSidebar.displayModifiers
     menu.addItem(show)
+    let nextNeedsYou = menuItem(
+      "Next Agent Needing Me", action: #selector(focusNextNeedsYouRun))
+    nextNeedsYou.keyEquivalent = GlobalHotKey.NextNeedsYou.displayKeyEquivalent
+    nextNeedsYou.keyEquivalentModifierMask = GlobalHotKey.NextNeedsYou.displayModifiers
+    menu.addItem(nextNeedsYou)
     menu.addItem(
       menuItem(
         model.isDetached ? "Attach to Ghostty" : "Reattach to Ghostty",
@@ -74,7 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let attention = model.needsYou.prefix(8)
     if !attention.isEmpty {
       menu.addItem(.separator())
-      let heading = NSMenuItem(title: "Needs You", action: nil, keyEquivalent: "")
+      let heading = NSMenuItem(title: "Needs Me", action: nil, keyEquivalent: "")
       heading.isEnabled = false
       menu.addItem(heading)
       for run in attention {
@@ -118,6 +137,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
   @objc private func showPanel() { panelController.focusForKeyboardNavigation() }
   @objc private func attachPanel() { panelController.attach() }
+
+  /// Walks the attention queue from oldest to newest and wraps at the end. The last run stays in
+  /// the queue after it is focused (focusing marks it read, but it is still blocked), so repeated
+  /// presses reliably cycle through every agent that needs the user.
+  @objc private func focusNextNeedsYouRun() {
+    let queue = model.needsYou.sorted {
+      if $0.lastEventAt != $1.lastEventAt { return $0.lastEventAt < $1.lastEventAt }
+      if $0.startedAt != $1.startedAt { return $0.startedAt < $1.startedAt }
+      return $0.runID < $1.runID
+    }
+    guard !queue.isEmpty else {
+      lastFocusedNeedsYouRunID = nil
+      panelController.focusForKeyboardNavigation()
+      return
+    }
+
+    let nextIndex: Int
+    if let lastFocusedNeedsYouRunID,
+      let currentIndex = queue.firstIndex(where: { $0.runID == lastFocusedNeedsYouRunID })
+    {
+      nextIndex = (currentIndex + 1) % queue.count
+    } else {
+      nextIndex = 0
+    }
+    let run = queue[nextIndex]
+    lastFocusedNeedsYouRunID = run.runID
+    model.focus(run)
+    panelController.show()
+  }
 
   @objc private func focusRun(_ sender: NSMenuItem) {
     guard let runID = sender.representedObject as? String,

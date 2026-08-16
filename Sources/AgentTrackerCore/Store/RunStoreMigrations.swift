@@ -28,7 +28,10 @@ extension RunStore {
         started_at REAL NOT NULL,
         last_event_at REAL NOT NULL,
         ended_at REAL,
-        exit_code INTEGER
+        exit_code INTEGER,
+        -- Kept last so a fresh database matches the column order an ALTER-migrated one ends up with.
+        working_since REAL,
+        last_turn_duration REAL
     );
     CREATE INDEX IF NOT EXISTS runs_status ON runs(status, last_event_at DESC);
     CREATE INDEX IF NOT EXISTS runs_recent ON runs(last_event_at DESC) WHERE ended_at IS NOT NULL;
@@ -44,6 +47,20 @@ extension RunStore {
       }
       if !columns.contains("git_deletions") {
         try database.execute("ALTER TABLE runs ADD COLUMN git_deletions INTEGER")
+      }
+    }
+  }
+
+  /// Turn timing was added after the first releases. Existing rows start out null and pick up real
+  /// values on their next event; the sidebar simply shows no duration until then.
+  func migrateRunTurnTimingColumns() throws {
+    try withLock {
+      let columns = try tableColumns("runs")
+      if !columns.contains("working_since") {
+        try database.execute("ALTER TABLE runs ADD COLUMN working_since REAL")
+      }
+      if !columns.contains("last_turn_duration") {
+        try database.execute("ALTER TABLE runs ADD COLUMN last_turn_duration REAL")
       }
     }
   }

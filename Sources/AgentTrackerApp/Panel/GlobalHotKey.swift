@@ -14,26 +14,17 @@ final class GlobalHotKey {
   private static let signature: OSType = 0x4147_544B
   private static var nextIdentifier: UInt32 = 1
   private static var actions: [UInt32: () -> Void] = [:]
+  private static var sharedHandlerRef: EventHandlerRef?
 
   private let identifier: UInt32
   private var hotKeyRef: EventHotKeyRef?
-  private var handlerRef: EventHandlerRef?
 
   /// Returns `nil` when the combination is already claimed by another application.
   init?(keyCode: UInt32, modifiers: UInt32, action: @escaping () -> Void) {
     identifier = Self.nextIdentifier
     Self.nextIdentifier += 1
 
-    var eventType = EventTypeSpec(
-      eventClass: OSType(kEventClassKeyboard),
-      eventKind: UInt32(kEventHotKeyPressed)
-    )
-    var handler: EventHandlerRef?
-    guard
-      InstallEventHandler(
-        GetApplicationEventTarget(), globalHotKeyEventHandler, 1, &eventType, nil, &handler)
-        == noErr
-    else { return nil }
+    guard Self.installSharedHandlerIfNeeded() else { return nil }
 
     var ref: EventHotKeyRef?
     let hotKeyID = EventHotKeyID(signature: Self.signature, id: identifier)
@@ -42,21 +33,37 @@ final class GlobalHotKey {
         == noErr,
       let ref
     else {
-      if let handler { RemoveEventHandler(handler) }
       return nil
     }
 
-    handlerRef = handler
     hotKeyRef = ref
     Self.actions[identifier] = action
   }
 
   func unregister() {
     if let hotKeyRef { UnregisterEventHotKey(hotKeyRef) }
-    if let handlerRef { RemoveEventHandler(handlerRef) }
     hotKeyRef = nil
-    handlerRef = nil
     Self.actions[identifier] = nil
+  }
+
+  /// All registered hot keys deliver the same Carbon event type. Installing this identical handler
+  /// once per shortcut makes the second installation fail as a duplicate, which looks exactly like
+  /// an unavailable shortcut to callers. Keep one process-lifetime handler and dispatch by ID.
+  private static func installSharedHandlerIfNeeded() -> Bool {
+    if sharedHandlerRef != nil { return true }
+    var eventType = EventTypeSpec(
+      eventClass: OSType(kEventClassKeyboard),
+      eventKind: UInt32(kEventHotKeyPressed)
+    )
+    var handler: EventHandlerRef?
+    guard
+      InstallEventHandler(
+        GetApplicationEventTarget(), globalHotKeyEventHandler, 1, &eventType, nil, &handler)
+        == noErr,
+      let handler
+    else { return false }
+    sharedHandlerRef = handler
+    return true
   }
 
   fileprivate static func fire(identifier: UInt32) {
@@ -95,4 +102,17 @@ extension GlobalHotKey {
     static let displayKeyEquivalent = "'"
     static let displayModifiers: NSEvent.ModifierFlags = [.command, .shift]
   }
+
+  /// ⌘⇧\ — jumps directly to the next agent waiting for the user.
+  enum NextNeedsYou {
+    static let keyCode = UInt32(kVK_ANSI_Backslash)
+    static let modifiers = UInt32(cmdKey | shiftKey)
+    static let displayKeyEquivalent = "\\"
+    static let displayModifiers: NSEvent.ModifierFlags = [.command, .shift]
+  }
+
+  static let shortcutsHelp = """
+    ⌘⇧'  Open sidebar and navigate agents
+    ⌘⇧\\  Jump to next agent that needs you
+    """
 }

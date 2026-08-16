@@ -6,8 +6,10 @@ Agent Tracker is a small native macOS sidecar for monitoring Claude Code, Codex 
 
 - Follows the focused Ghostty window as a detachable 320-point sidebar.
 - Tracks tabs, splits, and windows independently, including multiple agents in the same repository.
+- Subtly highlights and reveals the run mapped to Ghostty's currently focused terminal.
 - Uses each harness's lifecycle hooks instead of scraping terminal output.
 - Shows a menu-bar unread count and sends actionable macOS notifications.
+- Jumps to the next agent needing attention with `⌘⇧\`; `⌘⇧'` opens the sidebar for keyboard navigation.
 - Stores only local run metadata and a 120-character first-prompt preview; it stores no transcripts.
 - Resumes ended sessions from the Recent list: one click opens a new Ghostty terminal in the run's directory and types the harness's resume command into the shell, so the resumed session is tracked like any other.
 - Optionally shows compact remaining-usage meters for Claude, Codex, and Cursor by polling each provider with that product's existing local sign-in.

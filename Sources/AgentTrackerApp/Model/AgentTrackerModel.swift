@@ -12,6 +12,9 @@ final class AgentTrackerModel: ObservableObject {
   @Published private(set) var recentTotalCount = 0
   @Published var errorMessage: String?
   @Published private(set) var usageSnapshots: [ProviderUsageSnapshot] = []
+  /// How full each visible run's context window is, keyed by run ID. Sampled from the harness
+  /// transcripts on every refresh; runs whose harness records no token counts are simply absent.
+  @Published private(set) var sessionContexts: [String: SessionContext] = [:]
   @Published var usageMetersEnabled: Bool {
     didSet {
       UserDefaults.standard.set(usageMetersEnabled, forKey: PreferenceKeys.usageMetersEnabled)
@@ -25,6 +28,12 @@ final class AgentTrackerModel: ObservableObject {
   /// Tracked by run ID rather than row index so the highlight follows a run across the refreshes
   /// that reorder and regroup rows every 0.75s.
   @Published var selectedRunID: String?
+  /// The tracked run occupying Ghostty's currently focused terminal. Unlike `selectedRunID`, this
+  /// follows direct tab, split, and window changes in Ghostty and remains set outside keyboard mode.
+  @Published private(set) var focusedRunID: String?
+  /// Advances after an explicit jump even when that run was already focused, allowing the sidebar
+  /// to reveal a row the user may have manually scrolled offscreen.
+  @Published private(set) var focusedRunRevealRevision = 0
   /// Runs whose prompt preview is expanded to show more of the opening prompt. Keyed by run ID so
   /// the expansion follows a run across the refreshes that reorder and regroup rows.
   @Published private(set) var expandedRunIDs: Set<String> = []
@@ -41,6 +50,7 @@ final class AgentTrackerModel: ObservableObject {
 
   private var inbox: EventInbox?
   private var store: RunStore?
+  private let contextSampler = ContextSampler()
   private var timer: Timer?
   private var usageTask: Task<Void, Never>?
   private var lastGoodUsage: [Harness: ProviderUsageSnapshot] = [:]
@@ -66,7 +76,7 @@ final class AgentTrackerModel: ObservableObject {
 
   var unreadCount: Int { runs.filter(\.unreadAttention).count }
   var needsYou: [TrackedRun] {
-    runs.filter { $0.status == .needsAttention || $0.status == .waiting }
+    runs.filter { $0.status.needsYou }
   }
   var working: [TrackedRun] { runs.filter { $0.status == .working } }
   var idle: [TrackedRun] { runs.filter { $0.status == .starting } }
@@ -74,13 +84,20 @@ final class AgentTrackerModel: ObservableObject {
   var hasMoreRecent: Bool { recent.count < recentTotalCount }
   var remainingRecentCount: Int { max(recentTotalCount - recent.count, 0) }
 
+  /// Live sidebar rows, excluding Recent. Down-arrow from the last of these opens Recent.
+  private var activeNavigableRuns: [TrackedRun] { needsYou + working + idle }
+
   /// Rows the arrow keys walk, in the order they are drawn in the sidebar.
   var navigableRuns: [TrackedRun] {
-    needsYou + working + idle + (recentExpanded ? recent : [])
+    activeNavigableRuns + (recentExpanded ? recent : [])
   }
 
   /// Selects a starting row when entering keyboard mode, keeping any still-visible selection.
+  /// Opens Recent when it is the only section with rows, so ⌘⇧' still has somewhere to land.
   func beginKeyboardSelection() {
+    if activeNavigableRuns.isEmpty {
+      expandRecentForKeyboardNavigation()
+    }
     let candidates = navigableRuns
     if let selectedRunID, candidates.contains(where: { $0.runID == selectedRunID }) { return }
     selectedRunID = candidates.first?.runID
@@ -90,8 +107,13 @@ final class AgentTrackerModel: ObservableObject {
     selectedRunID = nil
   }
 
-  /// Moves the highlight by `delta` rows, clamping at the ends rather than wrapping.
+  /// Moves the highlight by `delta` rows, clamping at the ends rather than wrapping. Down-arrow
+  /// from the last live row expands Recent and lands on its first item; up-arrow back onto a live
+  /// row collapses it again.
   func moveSelection(by delta: Int) {
+    if shouldExpandRecentWhenMoving(by: delta) {
+      expandRecentForKeyboardNavigation()
+    }
     let candidates = navigableRuns
     guard !candidates.isEmpty else { return }
     guard let selectedRunID,
@@ -102,6 +124,31 @@ final class AgentTrackerModel: ObservableObject {
     }
     let target = min(max(index + delta, 0), candidates.count - 1)
     self.selectedRunID = candidates[target].runID
+    if shouldCollapseRecentAfterMoving(from: index, to: target) {
+      recentExpanded = false
+    }
+  }
+
+  private func expandRecentForKeyboardNavigation() {
+    guard !recentExpanded, recentTotalCount > 0 else { return }
+    recentExpanded = true
+  }
+
+  private func shouldExpandRecentWhenMoving(by delta: Int) -> Bool {
+    guard delta > 0, !recentExpanded, recentTotalCount > 0 else { return false }
+    let active = activeNavigableRuns
+    if active.isEmpty { return true }
+    guard let selectedRunID,
+      let index = active.firstIndex(where: { $0.runID == selectedRunID })
+    else { return false }
+    return index == active.count - 1
+  }
+
+  private func shouldCollapseRecentAfterMoving(from index: Int, to target: Int) -> Bool {
+    guard recentExpanded, target < index else { return false }
+    let activeCount = activeNavigableRuns.count
+    guard activeCount > 0 else { return false }
+    return index >= activeCount && target < activeCount
   }
 
   func isExpanded(_ run: TrackedRun) -> Bool { expandedRunIDs.contains(run.runID) }
@@ -205,6 +252,7 @@ final class AgentTrackerModel: ObservableObject {
       let runList = try store.runList(recentLimit: recentLimit)
       runs = runList.runs
       recentTotalCount = runList.recentCount
+      refreshSessionContexts(for: runList.runs)
       // Drop expansion state for runs that scrolled out of the list so the set cannot grow without
       // bound over a long session.
       let visibleIDs = Set(runList.runs.map(\.runID))
@@ -214,6 +262,21 @@ final class AgentTrackerModel: ObservableObject {
     } catch {
       errorMessage = error.localizedDescription
     }
+  }
+
+  /// Ghostty exposes stable terminal IDs through automation. Resolve the ID once per focus poll,
+  /// then prefer the first matching run in the store's active-first ordering so an old Recent row
+  /// that reused the same terminal does not light up alongside the live run.
+  func refreshFocusedRun() {
+    let resolvedRunID: String?
+    if runs.contains(where: { $0.ghosttyTerminalID != nil }), GhosttyAutomation.isFrontmost,
+      let terminalID = try? GhosttyAutomation.focusedTerminalID()
+    {
+      resolvedRunID = runs.first(where: { $0.ghosttyTerminalID == terminalID })?.runID
+    } else {
+      resolvedRunID = nil
+    }
+    if focusedRunID != resolvedRunID { focusedRunID = resolvedRunID }
   }
 
   func focus(_ run: TrackedRun) {
@@ -232,6 +295,8 @@ final class AgentTrackerModel: ObservableObject {
       try store.markSeen(runID: run.runID)
       dismissError()
       refresh()
+      refreshFocusedRun()
+      focusedRunRevealRevision &+= 1
     } catch {
       try? store.markUnavailable(runID: run.runID)
       showTransientError(error.localizedDescription)
@@ -300,6 +365,18 @@ final class AgentTrackerModel: ObservableObject {
       self?.errorMessage = nil
       self?.transientErrorTask = nil
     }
+  }
+
+  /// Re-reads context occupancy for the runs on screen. Cheap enough for the 0.75s refresh: the
+  /// sampler only touches a transcript whose size or timestamp moved since the last tick.
+  private func refreshSessionContexts(for visible: [TrackedRun]) {
+    let visibleIDs = Set(visible.map(\.runID))
+    contextSampler.retain(runIDs: visibleIDs)
+    var sampled: [String: SessionContext] = [:]
+    for run in visible {
+      if let context = contextSampler.sample(run) { sampled[run.runID] = context }
+    }
+    if sampled != sessionContexts { sessionContexts = sampled }
   }
 
   private func reconcileProcesses() throws {

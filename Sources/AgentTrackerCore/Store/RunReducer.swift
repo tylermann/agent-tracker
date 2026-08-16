@@ -30,22 +30,40 @@ enum RunReducer {
       if run.status == .starting || run.status == .ended || run.status == .unavailable {
         run.status = .starting
       }
+      run.workingSince = nil
       run.endedAt = nil
     case .promptSubmitted, .activity:
+      // Only the transition into working starts the clock. Every later tool call in the same turn
+      // leaves it alone, which is what makes the row report the length of the run rather than the
+      // gap between two tool calls. The nil check re-seeds rows stored before this was tracked.
+      if run.status != .working || run.workingSince == nil {
+        run.workingSince = event.occurredAt
+      }
       run.status = .working
       run.unreadAttention = false
       run.endedAt = nil
     case .attentionRequired:
+      finishTurn(&run, at: event.occurredAt)
       run.status = .needsAttention
       run.unreadAttention = true
     case .turnStopped:
+      finishTurn(&run, at: event.occurredAt)
       run.status = .waiting
       run.unreadAttention = true
     case .sessionEnded, .processExited:
+      finishTurn(&run, at: event.occurredAt)
       run.status = .ended
       run.unreadAttention = false
       run.endedAt = event.occurredAt
       run.exitCode = event.exitCode ?? run.exitCode
     }
+  }
+
+  /// Freezes the working stretch that just ended. A run that was already blocked keeps the duration
+  /// of its previous turn: a permission prompt arriving twice in a row must not report zero.
+  private static func finishTurn(_ run: inout TrackedRun, at date: Date) {
+    guard let workingSince = run.workingSince else { return }
+    run.lastTurnDuration = max(0, date.timeIntervalSince(workingSince))
+    run.workingSince = nil
   }
 }

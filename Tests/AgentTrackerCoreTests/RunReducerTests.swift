@@ -60,6 +60,53 @@ final class RunReducerTests: XCTestCase {
     XCTAssertEqual(subject.lastEventAt, base.addingTimeInterval(1))
   }
 
+  func testWorkingClockStartsOnceAndSurvivesToolActivity() {
+    var subject = makeRun()
+    RunReducer.reduce(event(.promptSubmitted, at: base), into: &subject)
+    XCTAssertEqual(subject.workingSince, base)
+    // Each tool call would previously have reset the visible timer.
+    RunReducer.reduce(event(.activity, at: base.addingTimeInterval(30)), into: &subject)
+    RunReducer.reduce(event(.activity, at: base.addingTimeInterval(90)), into: &subject)
+    XCTAssertEqual(subject.workingSince, base)
+    XCTAssertNil(subject.lastTurnDuration)
+  }
+
+  func testTurnDurationFreezesWhenTheRunComesBackToYou() {
+    for kind in [AgentEventKind.turnStopped, .attentionRequired, .sessionEnded] {
+      var subject = makeRun()
+      RunReducer.reduce(event(.promptSubmitted, at: base), into: &subject)
+      RunReducer.reduce(event(kind, at: base.addingTimeInterval(120)), into: &subject)
+      XCTAssertEqual(subject.lastTurnDuration, 120, "\(kind) should freeze the turn length")
+      XCTAssertNil(subject.workingSince, "\(kind) should stop the clock")
+    }
+  }
+
+  func testApprovingAPermissionPromptStartsAFreshTurn() {
+    var subject = makeRun()
+    RunReducer.reduce(event(.promptSubmitted, at: base), into: &subject)
+    RunReducer.reduce(event(.attentionRequired, at: base.addingTimeInterval(60)), into: &subject)
+    // The user takes five minutes to approve; that wait belongs to nobody's run time.
+    RunReducer.reduce(event(.activity, at: base.addingTimeInterval(360)), into: &subject)
+    XCTAssertEqual(subject.workingSince, base.addingTimeInterval(360))
+    RunReducer.reduce(event(.turnStopped, at: base.addingTimeInterval(400)), into: &subject)
+    XCTAssertEqual(subject.lastTurnDuration, 40)
+  }
+
+  func testBlockedRunKeepsPreviousTurnLengthWhenAlreadyStopped() {
+    var subject = makeRun()
+    RunReducer.reduce(event(.promptSubmitted, at: base), into: &subject)
+    RunReducer.reduce(event(.turnStopped, at: base.addingTimeInterval(45)), into: &subject)
+    RunReducer.reduce(event(.attentionRequired, at: base.addingTimeInterval(300)), into: &subject)
+    XCTAssertEqual(subject.lastTurnDuration, 45, "a second stop must not report a zero-length run")
+  }
+
+  func testRestartClearsTheWorkingClock() {
+    var subject = makeRun()
+    RunReducer.reduce(event(.promptSubmitted, at: base), into: &subject)
+    RunReducer.reduce(event(.sessionStarted, at: base.addingTimeInterval(10)), into: &subject)
+    XCTAssertNil(subject.workingSince)
+  }
+
   func testLastEventAtNeverMovesBackward() {
     var subject = makeRun()
     subject.lastEventAt = base.addingTimeInterval(10)

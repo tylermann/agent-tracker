@@ -41,6 +41,7 @@ public final class RunStore: @unchecked Sendable {
     try execute("PRAGMA foreign_keys=ON")
     try execute(Self.schema)
     try migrateRunGitDiffstatColumns()
+    try migrateRunTurnTimingColumns()
     try migrateHarnessQualifiedOrphans()
     try FileManager.default.setAttributes(
       [.posixPermissions: 0o600], ofItemAtPath: paths.database.path)
@@ -193,10 +194,21 @@ public final class RunStore: @unchecked Sendable {
   }
 
   public func markUnavailable(runID: String, at date: Date = Date()) throws {
+    // This path does not go through RunReducer, so it has to close out an in-flight working
+    // stretch itself; otherwise the row would keep reporting a stale turn length.
     try update(
-      "UPDATE runs SET status = 'unavailable', ended_at = ?, last_event_at = ? WHERE run_id = ? AND ended_at IS NULL",
+      """
+      UPDATE runs SET status = 'unavailable', ended_at = ?, last_event_at = ?,
+          last_turn_duration = CASE
+              WHEN working_since IS NOT NULL THEN MAX(0, ? - working_since)
+              ELSE last_turn_duration
+          END,
+          working_since = NULL
+      WHERE run_id = ? AND ended_at IS NULL
+      """,
       values: [
-        .double(date.timeIntervalSince1970), .double(date.timeIntervalSince1970), .text(runID),
+        .double(date.timeIntervalSince1970), .double(date.timeIntervalSince1970),
+        .double(date.timeIntervalSince1970), .text(runID),
       ]
     )
   }

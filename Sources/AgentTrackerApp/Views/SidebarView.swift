@@ -15,7 +15,7 @@ struct SidebarView: View {
         ScrollViewReader { proxy in
           ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
-              runSection("Needs You", tint: .orange, runs: model.needsYou)
+              runSection("Needs Me", tint: .orange, runs: model.needsYou)
               runSection("Working", tint: .blue, runs: model.working)
               runSection("Idle", tint: .gray, runs: model.idle)
               if model.recentTotalCount > 0 {
@@ -66,6 +66,22 @@ struct SidebarView: View {
             withAnimation(.easeOut(duration: 0.12)) {
               proxy.scrollTo(selected, anchor: .center)
             }
+          }
+          .onChange(of: model.focusedRunID) { _, focused in
+            guard let focused else { return }
+            withAnimation(.easeOut(duration: 0.12)) {
+              proxy.scrollTo(focused, anchor: .center)
+            }
+          }
+          .onChange(of: model.focusedRunRevealRevision) { _, _ in
+            guard let focused = model.focusedRunID else { return }
+            withAnimation(.easeOut(duration: 0.12)) {
+              proxy.scrollTo(focused, anchor: .center)
+            }
+          }
+          .onAppear {
+            guard let focused = model.focusedRunID else { return }
+            proxy.scrollTo(focused, anchor: .center)
           }
         }
       }
@@ -215,6 +231,14 @@ struct SidebarView: View {
           .background(.orange, in: Capsule())
           .foregroundStyle(.white)
       }
+      Image(systemName: "info.circle")
+        .font(SidebarTypography.subheadline)
+        .foregroundStyle(.secondary)
+        .frame(width: 20, height: 20)
+        .contentShape(Rectangle())
+        .help(GlobalHotKey.shortcutsHelp)
+        .accessibilityLabel("Keyboard shortcuts")
+        .accessibilityHint(GlobalHotKey.shortcutsHelp)
     }
     .padding(12)
   }
@@ -295,11 +319,17 @@ private struct RunRow: View {
   @State private var clampedPreviewHeight: CGFloat = 0
 
   private var isSelected: Bool { model.selectedRunID == run.runID }
+  private var isFocusedTerminal: Bool { model.focusedRunID == run.runID }
   private var isExpanded: Bool { model.isExpanded(run) }
   private var canExpand: Bool { fullPreviewHeight > clampedPreviewHeight + 0.5 }
   private var canResume: Bool { ResumeCommand.isAvailable(for: run) }
   private var canMarkUnavailable: Bool {
     run.ghosttyTerminalID == nil && run.status != .ended && run.status != .unavailable
+  }
+  private var isFinished: Bool { run.status == .ended || run.status == .unavailable }
+  private var hasFooterContent: Bool {
+    run.branch?.isEmpty == false || run.gitDiffstat?.hasChanges == true
+      || run.ghosttyTerminalID == nil || isFinished
   }
 
   var body: some View {
@@ -312,7 +342,17 @@ private struct RunRow: View {
           Text(run.status.displayName)
             .font(SidebarTypography.caption)
             .foregroundStyle(.secondary)
-          Spacer()
+            .lineLimit(1)
+          if let timing = RunPresentation.turnTiming(run) {
+            Text(timing.label)
+              .font(SidebarTypography.caption2)
+              .foregroundStyle(.tertiary)
+              .monospacedDigit()
+              .fixedSize()
+              .help(timing.help)
+              .accessibilityLabel(timing.help)
+          }
+          Spacer(minLength: 4)
           if run.status == .working {
             ProgressView()
               .controlSize(.small)
@@ -335,27 +375,40 @@ private struct RunRow: View {
             .onPreferenceChange(FullPreviewHeightKey.self) { fullPreviewHeight = $0 }
             .onPreferenceChange(ClampedPreviewHeightKey.self) { clampedPreviewHeight = $0 }
         }
-        HStack(spacing: 7) {
-          if let branch = run.branch, !branch.isEmpty {
-            footerItem(branch, systemImage: "arrow.triangle.branch")
-              .padding(.trailing, 2)
+        // The disclosure chevron is overlaid on this corner, so the row has to exist — and reserve
+        // its trailing space — even when there is no branch or diff to put in it.
+        if hasFooterContent || canExpand {
+          HStack(spacing: 7) {
+            if let branch = run.branch, !branch.isEmpty {
+              footerItem(branch, systemImage: "arrow.triangle.branch")
+                .padding(.trailing, 2)
+            }
+            if let diffstat = run.gitDiffstat, diffstat.hasChanges {
+              footerItem("\(diffstat.files)", systemImage: "doc")
+                .monospacedDigit()
+                .help("Uncommitted files")
+                .accessibilityLabel(
+                  "\(diffstat.files) \(diffstat.files == 1 ? "file" : "files") changed")
+            }
+            if run.ghosttyTerminalID == nil {
+              footerItem("No terminal link", systemImage: "link.badge.minus")
+            }
+            // Finished runs are the only ones where "when" still matters: the header says how long
+            // the run took, which does not help you find last Tuesday's session in Recent.
+            if isFinished {
+              Text("\(RunPresentation.durationLabel(-run.lastEventAt.timeIntervalSinceNow)) ago")
+                .monospacedDigit()
+            }
+            // Leave room for the disclosure chevron overlaid on this corner of the row.
+            if canExpand { Spacer(minLength: 22) }
           }
-          if let diffstat = run.gitDiffstat, diffstat.hasChanges {
-            footerItem("\(diffstat.files)", systemImage: "doc")
-              .monospacedDigit()
-              .help("Uncommitted files")
-              .accessibilityLabel(
-                "\(diffstat.files) \(diffstat.files == 1 ? "file" : "files") changed")
-          }
-          if run.ghosttyTerminalID == nil {
-            footerItem("No terminal link", systemImage: "link.badge.minus")
-          }
-          Text(run.lastEventAt, style: .relative)
-          // Leave room for the disclosure chevron overlaid on this corner of the row.
-          if canExpand { Spacer(minLength: 22) }
+          .font(SidebarTypography.caption2)
+          .foregroundStyle(.tertiary)
+          .frame(minHeight: 13, alignment: .leading)
         }
-        .font(SidebarTypography.caption2)
-        .foregroundStyle(.tertiary)
+        if let context = model.sessionContexts[run.runID] {
+          contextBar(context)
+        }
       }
       .padding(9)
       .padding(.leading, 5)
@@ -367,8 +420,8 @@ private struct RunRow: View {
       .clipShape(RoundedRectangle(cornerRadius: 9))
       .overlay {
         RoundedRectangle(cornerRadius: 9)
-          .strokeBorder(Color.accentColor, lineWidth: 2)
-          .opacity(isSelected ? 1 : 0)
+          .strokeBorder(Color.accentColor, lineWidth: isSelected ? 2 : 1)
+          .opacity(isSelected ? 1 : (isFocusedTerminal ? 0.65 : 0))
       }
       .contentShape(Rectangle())
       .opacity(run.status == .starting || run.status == .ended ? 0.75 : 1)
@@ -440,6 +493,32 @@ private struct RunRow: View {
     .accessibilityLabel(isExpanded ? "Collapse prompt" : "Expand prompt")
   }
 
+  /// How full this session's context window is, drawn along the bottom of the row and closed off
+  /// by the window's own size so the fill has a stated scale. Stops short of the trailing corner on
+  /// expandable rows so the disclosure chevron does not sit on top of it.
+  private func contextBar(_ context: SessionContext) -> some View {
+    HStack(spacing: 6) {
+      GeometryReader { geometry in
+        ZStack(alignment: .leading) {
+          Capsule().fill(Color.primary.opacity(0.07))
+          Capsule()
+            .fill(RunPresentation.contextColor(context))
+            .frame(width: geometry.size.width * context.fraction)
+        }
+      }
+      .frame(height: 3)
+      Text(RunPresentation.tokenLabel(context.windowTokens))
+        .font(SidebarTypography.contextLabel)
+        .foregroundStyle(.tertiary)
+        .monospacedDigit()
+        .fixedSize()
+    }
+    .padding(.top, 1)
+    .padding(.trailing, canExpand ? 20 : 0)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(RunPresentation.contextAccessibilityLabel(context))
+  }
+
   private func footerItem(_ title: String, systemImage: String) -> some View {
     HStack(spacing: 3) {
       Image(systemName: systemImage)
@@ -497,4 +576,7 @@ private enum SidebarTypography {
   static let subheadline = Font.system(size: 12)
   static let headline = Font.system(size: 18, weight: .semibold)
   static let resetLabel = Font.system(size: 11)
+  /// Smaller than any other row text: it annotates the context bar's scale rather than adding
+  /// another thing to read.
+  static let contextLabel = Font.system(size: 10)
 }
