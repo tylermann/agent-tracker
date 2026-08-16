@@ -20,6 +20,8 @@ extension RunStore {
         project_root TEXT,
         cwd TEXT,
         branch TEXT,
+        git_insertions INTEGER,
+        git_deletions INTEGER,
         prompt_preview TEXT,
         status TEXT NOT NULL,
         unread INTEGER NOT NULL DEFAULT 0,
@@ -31,6 +33,31 @@ extension RunStore {
     CREATE INDEX IF NOT EXISTS runs_status ON runs(status, last_event_at DESC);
     CREATE INDEX IF NOT EXISTS runs_recent ON runs(last_event_at DESC) WHERE ended_at IS NOT NULL;
     """
+
+  /// Existing databases were created with `CREATE TABLE IF NOT EXISTS`, so new columns have to
+  /// be added explicitly. Fresh databases already have these columns from `schema`.
+  func migrateRunGitDiffstatColumns() throws {
+    try withLock {
+      let columns = try tableColumns("runs")
+      if !columns.contains("git_insertions") {
+        try database.execute("ALTER TABLE runs ADD COLUMN git_insertions INTEGER")
+      }
+      if !columns.contains("git_deletions") {
+        try database.execute("ALTER TABLE runs ADD COLUMN git_deletions INTEGER")
+      }
+    }
+  }
+
+  private func tableColumns(_ table: String) throws -> Set<String> {
+    let statement = try database.prepare("PRAGMA table_info(\(table))")
+    defer { sqlite3_finalize(statement) }
+    var names = Set<String>()
+    while sqlite3_step(statement) == SQLITE_ROW {
+      guard let name = sqlite3_column_text(statement, 1) else { continue }
+      names.insert(String(cString: name))
+    }
+    return names
+  }
 
   /// Merges legacy `orphan-<harness>-<session>` rows (an earlier run-ID scheme) into the
   /// harness-neutral `orphan-<session>` identity. Runs on every open: there is no schema version
@@ -93,6 +120,7 @@ extension RunStore {
     merged.projectRoot = metadataOrder.compactMap(\.projectRoot).first
     merged.workingDirectory = metadataOrder.compactMap(\.workingDirectory).first
     merged.branch = metadataOrder.compactMap(\.branch).first
+    merged.gitDiffstat = metadataOrder.compactMap(\.gitDiffstat).first
     merged.promptPreview = metadataOrder.compactMap(\.promptPreview).first
 
     for run in candidates where run.runID != canonicalID {

@@ -102,6 +102,69 @@ final class GhosttyAutomationTests: XCTestCase {
     XCTAssertEqual(scripts.count, 2)
   }
 
+  func testOpenTabTypesCommandIntoNewSurfaceInWorkingDirectory() throws {
+    var scripts: [String] = []
+
+    try GhosttyAutomation.openTab(
+      command: "codex resume 'abc-123'",
+      workingDirectory: "/Users/me/project"
+    ) { source in
+      scripts.append(source)
+      return ""
+    }
+
+    XCTAssertEqual(scripts.count, 1)
+    let script = scripts[0]
+    XCTAssertTrue(script.contains("if (count of windows) is 0"))
+    XCTAssertTrue(script.contains("new window with configuration"))
+    XCTAssertTrue(script.contains("new tab in front window with configuration"))
+    XCTAssertTrue(script.contains("initial working directory:\"/Users/me/project\""))
+    XCTAssertTrue(script.contains("initial input:(\"codex resume 'abc-123'\" & return)"))
+    XCTAssertTrue(script.contains("activate"))
+  }
+
+  func testOpenTabOmitsWorkingDirectoryWhenUnknown() throws {
+    var scripts: [String] = []
+
+    try GhosttyAutomation.openTab(command: "claude --resume 'abc'", workingDirectory: nil) {
+      source in
+      scripts.append(source)
+      return ""
+    }
+
+    XCTAssertEqual(scripts.count, 1)
+    XCTAssertFalse(scripts[0].contains("initial working directory"))
+  }
+
+  func testOpenTabEscapesAppleScriptStringContent() throws {
+    var scripts: [String] = []
+
+    try GhosttyAutomation.openTab(
+      command: "claude --resume 'a\"b'",
+      workingDirectory: "/Users/me/\"quoted\" dir"
+    ) { source in
+      scripts.append(source)
+      return ""
+    }
+
+    XCTAssertEqual(scripts.count, 1)
+    XCTAssertTrue(scripts[0].contains("initial working directory:\"/Users/me/\\\"quoted\\\" dir\""))
+    XCTAssertTrue(scripts[0].contains("initial input:(\"claude --resume 'a\\\"b'\" & return)"))
+  }
+
+  func testOpenTabPropagatesScriptFailure() {
+    XCTAssertThrowsError(
+      try GhosttyAutomation.openTab(command: "codex resume 'abc'", workingDirectory: nil) { _ in
+        throw GhosttyAutomationError.script("Not authorized to send Apple events.")
+      }
+    ) { error in
+      guard case GhosttyAutomationError.script(let message) = error else {
+        return XCTFail("Expected script error, got \(error)")
+      }
+      XCTAssertEqual(message, "Not authorized to send Apple events.")
+    }
+  }
+
   func testFocusDoesNotActivateGhosttyWhenDetachedTerminalIsMissingFromWindows() throws {
     var scripts: [String] = []
 

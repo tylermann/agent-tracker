@@ -190,6 +190,68 @@ final class RunStoreTests: XCTestCase {
     XCTAssertEqual(try store.run(id: "shared")?.workingDirectory, "/Users/example/project")
   }
 
+  func testDiffstatIsRecordedOnAttentionAndSkippedOnActivity() throws {
+    let repository = try makeGitRepository()
+    defer { try? FileManager.default.removeItem(at: repository) }
+    try "one\ntwo\n".write(
+      to: repository.appendingPathComponent("extra.swift"), atomically: true, encoding: .utf8)
+
+    _ = try store.apply(
+      AgentEvent(
+        runID: "run", harness: .codex, kind: .processStarted, cwd: repository.path))
+    XCTAssertNil(try store.run(id: "run")?.gitDiffstat)
+    XCTAssertFalse((try store.run(id: "run")?.branch ?? "").isEmpty)
+
+    _ = try store.apply(
+      AgentEvent(runID: "run", harness: .codex, kind: .activity, cwd: repository.path))
+    XCTAssertNil(try store.run(id: "run")?.gitDiffstat)
+
+    _ = try store.apply(
+      AgentEvent(runID: "run", harness: .codex, kind: .turnStopped, cwd: repository.path))
+    XCTAssertEqual(try store.run(id: "run")?.gitDiffstat, GitDiffstat(files: 1))
+  }
+
+  func testExistingDatabaseGainsGitDiffstatColumns() throws {
+    store = nil
+    let database = temporaryDirectory.appendingPathComponent("runs.sqlite3")
+    try FileManager.default.removeItem(at: database)
+    try sqlite3(
+      database.path,
+      """
+      CREATE TABLE events(
+          event_id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          occurred_at REAL NOT NULL
+      );
+      CREATE TABLE runs(
+          run_id TEXT PRIMARY KEY,
+          harness TEXT NOT NULL,
+          harness_session_id TEXT,
+          terminal_id TEXT,
+          executable TEXT,
+          pid INTEGER,
+          project_root TEXT,
+          cwd TEXT,
+          branch TEXT,
+          prompt_preview TEXT,
+          status TEXT NOT NULL,
+          unread INTEGER NOT NULL DEFAULT 0,
+          started_at REAL NOT NULL,
+          last_event_at REAL NOT NULL,
+          ended_at REAL,
+          exit_code INTEGER
+      );
+      """
+    )
+
+    store = try RunStore(paths: AgentTrackerPaths(root: temporaryDirectory))
+    _ = try store.apply(event(.turnStopped, at: Date()))
+    let run = try XCTUnwrap(try store.run(id: "run"))
+    XCTAssertEqual(run.status, .waiting)
+    XCTAssertNil(run.gitDiffstat)
+  }
+
   func testLegacyHarnessQualifiedOrphansAreMergedOnOpen() throws {
     let sessionID = "legacy-session"
     _ = try store.apply(
@@ -223,6 +285,46 @@ final class RunStoreTests: XCTestCase {
     XCTAssertEqual(runs.first?.workingDirectory, "/Users/example/.cursor")
     XCTAssertNil(try store.run(id: "orphan-claude-\(sessionID)"))
     XCTAssertNil(try store.run(id: "orphan-cursor-\(sessionID)"))
+  }
+
+  private func makeGitRepository() throws -> URL {
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("AgentTrackerStoreGit-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    try git(["init"], in: url)
+    try git(["config", "user.email", "test@example.com"], in: url)
+    try git(["config", "user.name", "Test"], in: url)
+    try "hello\n".write(
+      to: url.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+    try git(["add", "file.txt"], in: url)
+    try git(["commit", "-m", "init"], in: url)
+    return url
+  }
+
+  private func git(_ arguments: [String], in directory: URL) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["-C", directory.path] + arguments
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    process.waitUntilExit()
+    XCTAssertEqual(process.terminationStatus, 0, "git \(arguments.joined(separator: " "))")
+  }
+
+  private func sqlite3(_ path: String, _ sql: String) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+    process.arguments = [path]
+    let input = Pipe()
+    process.standardInput = input
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    try input.fileHandleForWriting.write(contentsOf: Data(sql.utf8))
+    try input.fileHandleForWriting.close()
+    process.waitUntilExit()
+    XCTAssertEqual(process.terminationStatus, 0, "sqlite3 \(path)")
   }
 
   private func event(_ kind: AgentEventKind, at date: Date, preview: String? = nil) -> AgentEvent {

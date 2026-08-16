@@ -223,7 +223,7 @@ final class AgentTrackerModel: ObservableObject {
     }
     guard let terminalID = run.ghosttyTerminalID else {
       showTransientError(
-        "This run has no Ghostty terminal link. It may have started before Agent Tracker was loaded."
+        "This run has no Ghostty terminal link, so it cannot be focused. If it has stopped, mark it as unavailable."
       )
       return
     }
@@ -236,6 +236,36 @@ final class AgentTrackerModel: ObservableObject {
       try? store.markUnavailable(runID: run.runID)
       showTransientError(error.localizedDescription)
       refresh()
+    }
+  }
+
+  /// Reopens an ended run's harness session in a new Ghostty terminal at the run's directory.
+  func resume(_ run: TrackedRun) {
+    guard let command = ResumeCommand.command(for: run) else {
+      showTransientError("This run did not record a session ID, so it cannot be resumed.")
+      return
+    }
+    do {
+      try GhosttyAutomation.openTab(
+        command: command,
+        workingDirectory: run.workingDirectory ?? run.projectRoot
+      )
+      dismissError()
+    } catch {
+      showTransientError(error.localizedDescription)
+    }
+  }
+
+  /// An event-only run has no wrapper PID to reconcile, so this is an explicit user decision
+  /// rather than an automatic timeout that could hide genuinely long-running work.
+  func markUnavailable(_ run: TrackedRun) {
+    guard run.ghosttyTerminalID == nil, let store else { return }
+    do {
+      try store.markUnavailable(runID: run.runID)
+      dismissError()
+      refresh()
+    } catch {
+      errorMessage = error.localizedDescription
     }
   }
 

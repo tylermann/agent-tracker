@@ -24,6 +24,11 @@ public struct RunList: Sendable {
 }
 
 public final class RunStore: @unchecked Sendable {
+  /// Git status is only worth a subprocess when the user is about to look at the row.
+  static let diffstatEventKinds: Set<AgentEventKind> = [
+    .attentionRequired, .turnStopped, .sessionEnded, .processExited,
+  ]
+
   let database: SQLiteDatabase
   private let lock = NSLock()
 
@@ -35,6 +40,7 @@ public final class RunStore: @unchecked Sendable {
     try execute("PRAGMA busy_timeout=1000")
     try execute("PRAGMA foreign_keys=ON")
     try execute(Self.schema)
+    try migrateRunGitDiffstatColumns()
     try migrateHarnessQualifiedOrphans()
     try FileManager.default.setAttributes(
       [.posixPermissions: 0o600], ofItemAtPath: paths.database.path)
@@ -65,11 +71,22 @@ public final class RunStore: @unchecked Sendable {
 
     guard result.inserted else { return result.run }
 
+    // Activity ticks are frequent and do not change what the user needs to see. Refresh git only
+    // when a row still needs a branch/root, or when the run is asking for attention / has stopped.
+    let includeDiffstat = Self.diffstatEventKinds.contains(event.kind)
+    let missingIdentity = result.run.projectRoot == nil || result.run.branch == nil
+    guard includeDiffstat || (missingIdentity && event.kind != .activity) else {
+      return result.run
+    }
+
     // `Process.waitUntilExit()` in GitMetadata can service the main run loop. Never invoke it while
     // holding the store lock: a timer or distributed notification may re-enter the model refresh
     // and synchronously attempt to acquire this same lock.
-    let metadata = GitMetadata.read(from: result.run.workingDirectory)
-    guard metadata.root != nil || metadata.branch != nil else { return result.run }
+    let metadata = GitMetadata.read(
+      from: result.run.workingDirectory, includeDiffstat: includeDiffstat)
+    guard metadata.root != nil || metadata.branch != nil || metadata.diffstat != nil else {
+      return result.run
+    }
 
     return try withLock {
       // A newer event may have changed the working directory while metadata was being read. Only
@@ -78,6 +95,7 @@ public final class RunStore: @unchecked Sendable {
       guard latest.workingDirectory == result.run.workingDirectory else { return latest }
       if latest.projectRoot == nil { latest.projectRoot = metadata.root }
       if metadata.branch != nil { latest.branch = metadata.branch }
+      if let diffstat = metadata.diffstat { latest.gitDiffstat = diffstat }
       try upsertUnlocked(latest)
       return latest
     }

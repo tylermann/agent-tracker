@@ -7,7 +7,7 @@ import Foundation
 enum RunRowCodec {
   static let columns =
     "run_id, harness, harness_session_id, terminal_id, executable, pid, "
-    + "project_root, cwd, branch, prompt_preview, status, unread, "
+    + "project_root, cwd, branch, git_insertions, git_deletions, prompt_preview, status, unread, "
     + "started_at, last_event_at, ended_at, exit_code"
 
   /// Shared ORDER BY clause matching the sidebar's visible sections. Within a section, a run's
@@ -27,11 +27,12 @@ enum RunRowCodec {
     """
 
   static let upsertSQL = """
-    INSERT INTO runs(\(columns)) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO runs(\(columns)) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(run_id) DO UPDATE SET
         harness=excluded.harness, harness_session_id=excluded.harness_session_id,
         terminal_id=excluded.terminal_id, executable=excluded.executable, pid=excluded.pid,
         project_root=excluded.project_root, cwd=excluded.cwd, branch=excluded.branch,
+        git_insertions=excluded.git_insertions, git_deletions=excluded.git_deletions,
         prompt_preview=excluded.prompt_preview, status=excluded.status, unread=excluded.unread,
         started_at=excluded.started_at, last_event_at=excluded.last_event_at,
         ended_at=excluded.ended_at, exit_code=excluded.exit_code
@@ -42,6 +43,8 @@ enum RunRowCodec {
       .text(run.runID), .text(run.harness.rawValue), optional(run.harnessSessionID),
       optional(run.ghosttyTerminalID), optional(run.executable), optional(run.processID),
       optional(run.projectRoot), optional(run.workingDirectory), optional(run.branch),
+      optional(run.gitDiffstat.map { Int32(clamping: $0.files) }),
+      optional(run.gitDiffstat.map { _ in Int32(0) }),
       optional(run.promptPreview), .text(run.status.rawValue), .int(run.unreadAttention ? 1 : 0),
       .double(run.startedAt.timeIntervalSince1970),
       .double(run.lastEventAt.timeIntervalSince1970),
@@ -60,14 +63,24 @@ enum RunRowCodec {
       projectRoot: text(statement, 6),
       workingDirectory: text(statement, 7),
       branch: text(statement, 8),
-      promptPreview: text(statement, 9),
-      status: RunStatus(rawValue: text(statement, 10) ?? "") ?? .unavailable,
-      unreadAttention: sqlite3_column_int(statement, 11) != 0,
-      startedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 12)),
-      lastEventAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 13)),
-      endedAt: nullableDate(statement, 14),
-      exitCode: nullableInt(statement, 15)
+      gitDiffstat: gitDiffstat(statement, files: 9, leftover: 10),
+      promptPreview: text(statement, 11),
+      status: RunStatus(rawValue: text(statement, 12) ?? "") ?? .unavailable,
+      unreadAttention: sqlite3_column_int(statement, 13) != 0,
+      startedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 14)),
+      lastEventAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 15)),
+      endedAt: nullableDate(statement, 16),
+      exitCode: nullableInt(statement, 17)
     )
+  }
+
+  private static func gitDiffstat(
+    _ statement: OpaquePointer, files: Int32, leftover: Int32
+  ) -> GitDiffstat? {
+    guard let fileCount = nullableInt(statement, files) else { return nil }
+    // Older rows stored added/deleted separately; sum them so a single count still reads.
+    let extra = nullableInt(statement, leftover).map(Int.init) ?? 0
+    return GitDiffstat(files: Int(fileCount) + extra)
   }
 
   private static func text(_ statement: OpaquePointer, _ index: Int32) -> String? {

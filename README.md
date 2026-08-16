@@ -9,6 +9,7 @@ Agent Tracker is a small native macOS sidecar for monitoring Claude Code, Codex 
 - Uses each harness's lifecycle hooks instead of scraping terminal output.
 - Shows a menu-bar unread count and sends actionable macOS notifications.
 - Stores only local run metadata and a 120-character first-prompt preview; it stores no transcripts.
+- Resumes ended sessions from the Recent list: one click opens a new Ghostty terminal in the run's directory and types the harness's resume command into the shell, so the resumed session is tracked like any other.
 - Optionally shows compact remaining-usage meters for Claude, Codex, and Cursor by polling each provider with that product's existing local sign-in.
 - Installs and removes its hooks and zsh wrappers without replacing unrelated configuration.
 

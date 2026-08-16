@@ -297,6 +297,10 @@ private struct RunRow: View {
   private var isSelected: Bool { model.selectedRunID == run.runID }
   private var isExpanded: Bool { model.isExpanded(run) }
   private var canExpand: Bool { fullPreviewHeight > clampedPreviewHeight + 0.5 }
+  private var canResume: Bool { ResumeCommand.isAvailable(for: run) }
+  private var canMarkUnavailable: Bool {
+    run.ghosttyTerminalID == nil && run.status != .ended && run.status != .unavailable
+  }
 
   var body: some View {
     Button {
@@ -331,12 +335,20 @@ private struct RunRow: View {
             .onPreferenceChange(FullPreviewHeightKey.self) { fullPreviewHeight = $0 }
             .onPreferenceChange(ClampedPreviewHeightKey.self) { clampedPreviewHeight = $0 }
         }
-        HStack(spacing: 5) {
+        HStack(spacing: 7) {
           if let branch = run.branch, !branch.isEmpty {
-            Label(branch, systemImage: "arrow.triangle.branch")
+            footerItem(branch, systemImage: "arrow.triangle.branch")
+              .padding(.trailing, 2)
+          }
+          if let diffstat = run.gitDiffstat, diffstat.hasChanges {
+            footerItem("\(diffstat.files)", systemImage: "doc")
+              .monospacedDigit()
+              .help("Uncommitted files")
+              .accessibilityLabel(
+                "\(diffstat.files) \(diffstat.files == 1 ? "file" : "files") changed")
           }
           if run.ghosttyTerminalID == nil {
-            Label("No terminal link", systemImage: "link.badge.minus")
+            footerItem("No terminal link", systemImage: "link.badge.minus")
           }
           Text(run.lastEventAt, style: .relative)
           // Leave room for the disclosure chevron overlaid on this corner of the row.
@@ -367,7 +379,48 @@ private struct RunRow: View {
     .overlay(alignment: .bottomTrailing) {
       if canExpand { disclosure }
     }
+    .overlay(alignment: .topTrailing) {
+      if canMarkUnavailable {
+        unavailableButton
+      } else if canResume {
+        resumeButton
+      }
+    }
     .id(run.runID)
+  }
+
+  private var resumeButton: some View {
+    Button {
+      model.resume(run)
+    } label: {
+      Image(systemName: "arrow.counterclockwise")
+        .font(SidebarTypography.caption2.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .frame(width: 20, height: 18)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .padding(.trailing, 4)
+    .padding(.top, 7)
+    .help("Resume this session in a new Ghostty terminal")
+    .accessibilityLabel("Resume session")
+  }
+
+  private var unavailableButton: some View {
+    Button {
+      model.markUnavailable(run)
+    } label: {
+      Image(systemName: "xmark.circle")
+        .font(SidebarTypography.caption2.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .frame(width: 20, height: 18)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .padding(.trailing, 4)
+    .padding(.top, 7)
+    .help("Mark as no longer running")
+    .accessibilityLabel("Mark as no longer running")
   }
 
   private var disclosure: some View {
@@ -385,6 +438,14 @@ private struct RunRow: View {
     .padding(.bottom, 5)
     .help(isExpanded ? "Show less of the prompt" : "Show more of the prompt")
     .accessibilityLabel(isExpanded ? "Collapse prompt" : "Expand prompt")
+  }
+
+  private func footerItem(_ title: String, systemImage: String) -> some View {
+    HStack(spacing: 3) {
+      Image(systemName: systemImage)
+        .frame(width: 11, alignment: .center)
+      Text(title)
+    }
   }
 
   private func previewText(_ preview: String) -> some View {

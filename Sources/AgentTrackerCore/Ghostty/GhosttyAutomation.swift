@@ -118,6 +118,37 @@ public enum GhosttyAutomation {
     }
   }
 
+  /// Opens a new terminal in `workingDirectory` and types `command` into its shell. Typing the
+  /// command (instead of launching it as the surface's command) keeps the surface on the user's
+  /// interactive zsh, so the managed wrapper functions run and the new session is tracked.
+  public static func openTab(command: String, workingDirectory: String?) throws {
+    try openTab(command: command, workingDirectory: workingDirectory, runScript: run)
+  }
+
+  static func openTab(
+    command: String,
+    workingDirectory: String?,
+    runScript: (String) throws -> String
+  ) throws {
+    var fields = [String]()
+    if let workingDirectory, !workingDirectory.isEmpty {
+      fields.append("initial working directory:\"\(appleScriptString(workingDirectory))\"")
+    }
+    fields.append("initial input:(\"\(appleScriptString(command))\" & return)")
+    let configuration = "{\(fields.joined(separator: ", "))}"
+    let source = """
+      tell application "Ghostty"
+          if (count of windows) is 0 then
+              new window with configuration \(configuration)
+          else
+              new tab in front window with configuration \(configuration)
+          end if
+          activate
+      end tell
+      """
+    _ = try runScript(source)
+  }
+
   public static func isFocused(terminalID: String) -> Bool {
     guard (try? focusedTerminalID()) == terminalID,
       let frontmost = NSWorkspace.shared.frontmostApplication

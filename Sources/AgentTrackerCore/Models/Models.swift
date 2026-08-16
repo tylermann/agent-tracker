@@ -105,6 +105,7 @@ public struct TrackedRun: Identifiable, Codable, Equatable, Sendable {
   public var projectRoot: String?
   public var workingDirectory: String?
   public var branch: String?
+  public var gitDiffstat: GitDiffstat?
   public var promptPreview: String?
   public var status: RunStatus
   public var unreadAttention: Bool
@@ -123,6 +124,7 @@ public struct TrackedRun: Identifiable, Codable, Equatable, Sendable {
     projectRoot: String? = nil,
     workingDirectory: String? = nil,
     branch: String? = nil,
+    gitDiffstat: GitDiffstat? = nil,
     promptPreview: String? = nil,
     status: RunStatus = .starting,
     unreadAttention: Bool = false,
@@ -140,6 +142,7 @@ public struct TrackedRun: Identifiable, Codable, Equatable, Sendable {
     self.projectRoot = projectRoot
     self.workingDirectory = workingDirectory
     self.branch = branch
+    self.gitDiffstat = gitDiffstat
     self.promptPreview = promptPreview
     self.status = status
     self.unreadAttention = unreadAttention
