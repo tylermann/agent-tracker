@@ -39,16 +39,16 @@ public enum ModelIdentity {
     return model
   }
 
-  /// Turns provider model IDs into compact names that fit the row header. Provider-specific
-  /// aliases deliberately omit Anthropic's release/version suffixes: "Fable" is the useful choice
-  /// to scan for, while "claude-fable-5-20260801" is implementation detail.
+  /// Turns provider model IDs into compact names that fit the row header. Release dates are
+  /// dropped — "Opus 4.5" is the useful thing to scan for, while "claude-opus-4-5-20251101" is
+  /// implementation detail.
   public static func displayName(for rawModel: String?) -> String? {
     guard let rawModel = usable(rawModel) else { return nil }
     let normalized = rawModel.lowercased().replacingOccurrences(of: "_", with: "-")
 
     for family in ["fable", "mythos", "opus", "sonnet", "haiku"]
     where containsToken(family, in: normalized) {
-      return family.capitalized
+      return labeled(family.capitalized, version: anthropicVersion(in: normalized))
     }
 
     for family in ["sol", "terra", "luna"] where containsToken(family, in: normalized) {
@@ -102,6 +102,23 @@ public enum ModelIdentity {
         component.first?.isNumber == true
           && component.allSatisfy { $0.isNumber || $0 == "." }
       }
+  }
+
+  /// Anthropic spells a version as separate path components and appends a release date
+  /// (`claude-opus-4-5-20251101`), so the single-number scan above would read that as "4". Joins
+  /// the leading numeric components instead, ignoring the date and any trailing tags Cursor
+  /// appends (`claude-opus-5[context=1m]`).
+  private static func anthropicVersion(in value: String) -> String? {
+    let numbers =
+      value
+      .split(whereSeparator: { !$0.isNumber && !$0.isLetter && $0 != "." })
+      .map(String.init)
+      .filter { component in
+        component.allSatisfy { $0.isNumber || $0 == "." } && component.count < 6
+      }
+    guard let major = numbers.first else { return nil }
+    guard !major.contains("."), numbers.count > 1, !numbers[1].contains(".") else { return major }
+    return "\(major).\(numbers[1])"
   }
 
   private static func labeled(_ family: String, version: String?) -> String {
