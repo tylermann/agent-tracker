@@ -39,6 +39,7 @@ public struct AgentEvent: Codable, Equatable, Sendable {
   public var promptPreview: String?
   public var detail: String?
   public var executable: String?
+  public var modelID: String?
   public var exitCode: Int32?
 
   public init(
@@ -55,6 +56,7 @@ public struct AgentEvent: Codable, Equatable, Sendable {
     promptPreview: String? = nil,
     detail: String? = nil,
     executable: String? = nil,
+    modelID: String? = nil,
     exitCode: Int32? = nil
   ) {
     self.schemaVersion = schemaVersion
@@ -70,6 +72,7 @@ public struct AgentEvent: Codable, Equatable, Sendable {
     self.promptPreview = promptPreview
     self.detail = detail
     self.executable = executable
+    self.modelID = modelID
     self.exitCode = exitCode
   }
 }
@@ -111,6 +114,7 @@ public struct TrackedRun: Identifiable, Codable, Equatable, Sendable {
   public var branch: String?
   public var gitDiffstat: GitDiffstat?
   public var promptPreview: String?
+  public var modelID: String?
   public var status: RunStatus
   public var unreadAttention: Bool
   public var startedAt: Date
@@ -138,6 +142,7 @@ public struct TrackedRun: Identifiable, Codable, Equatable, Sendable {
     branch: String? = nil,
     gitDiffstat: GitDiffstat? = nil,
     promptPreview: String? = nil,
+    modelID: String? = nil,
     status: RunStatus = .starting,
     unreadAttention: Bool = false,
     startedAt: Date = Date(),
@@ -158,6 +163,7 @@ public struct TrackedRun: Identifiable, Codable, Equatable, Sendable {
     self.branch = branch
     self.gitDiffstat = gitDiffstat
     self.promptPreview = promptPreview
+    self.modelID = modelID
     self.status = status
     self.unreadAttention = unreadAttention
     self.startedAt = startedAt

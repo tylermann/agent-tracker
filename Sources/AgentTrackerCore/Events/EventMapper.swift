@@ -81,6 +81,11 @@ public enum EventMapper {
       in: payload,
       keys: ["notification_type", "notificationType", "message", "tool_name", "toolName"]
     )
+    let modelID =
+      string(
+        in: payload,
+        keys: ["model_id", "modelId", "model", "display_name", "displayName"]
+      ) ?? environment["AGENT_TRACKER_MODEL_ID"]
 
     return AgentEvent(
       occurredAt: now,
@@ -96,7 +101,8 @@ public enum EventMapper {
       )
         ?? environment["PWD"],
       promptPreview: rawPrompt.map { promptPreview($0) },
-      detail: detail
+      detail: detail,
+      modelID: modelID
     )
   }
 

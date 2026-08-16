@@ -30,6 +30,7 @@ final class EventInboxTests: XCTestCase {
       promptPreview: "Fix it",
       detail: "detail",
       executable: "/usr/local/bin/claude",
+      modelID: "fable",
       exitCode: 0
     )
   }
@@ -62,7 +63,7 @@ final class EventInboxTests: XCTestCase {
       [
         "schemaVersion", "eventID", "occurredAt", "runID", "harness", "kind",
         "harnessSessionID", "ghosttyTerminalID", "processID", "cwd", "promptPreview",
-        "detail", "executable", "exitCode",
+        "detail", "executable", "modelID", "exitCode",
       ])
     XCTAssertEqual(root["schemaVersion"] as? Int, 1)
     XCTAssertEqual(root["harness"] as? String, "claude")

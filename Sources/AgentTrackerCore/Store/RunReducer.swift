@@ -11,6 +11,7 @@ enum RunReducer {
     if acceptsHarnessMetadata {
       run.harness = event.harness
       run.workingDirectory = event.cwd ?? run.workingDirectory
+      run.modelID = event.modelID ?? run.modelID
     }
     run.harnessSessionID = event.harnessSessionID ?? run.harnessSessionID
     run.ghosttyTerminalID = event.ghosttyTerminalID ?? run.ghosttyTerminalID

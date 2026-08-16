@@ -42,6 +42,7 @@ public final class RunStore: @unchecked Sendable {
     try execute(Self.schema)
     try migrateRunGitDiffstatColumns()
     try migrateRunTurnTimingColumns()
+    try migrateRunModelColumn()
     try migrateHarnessQualifiedOrphans()
     try FileManager.default.setAttributes(
       [.posixPermissions: 0o600], ofItemAtPath: paths.database.path)
@@ -191,6 +192,17 @@ public final class RunStore: @unchecked Sendable {
 
   public func markSeen(runID: String) throws {
     try update("UPDATE runs SET unread = 0 WHERE run_id = ?", values: [.text(runID)])
+  }
+
+  /// Persists model telemetry discovered after the lifecycle event was stored (for example, from
+  /// a transcript or Cursor status-line sample). A session may switch models, so newer samples are
+  /// allowed to replace the original command-line choice.
+  public func setModel(_ modelID: String, forRunID runID: String) throws {
+    guard !modelID.isEmpty else { return }
+    try update(
+      "UPDATE runs SET model_id = ? WHERE run_id = ?",
+      values: [.text(modelID), .text(runID)]
+    )
   }
 
   public func markUnavailable(runID: String, at date: Date = Date()) throws {

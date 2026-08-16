@@ -42,22 +42,36 @@ enum TranscriptContextParser {
   }
 
   /// Codex emits a `token_count` event carrying both halves of the answer, including the window
-  /// for the model actually serving the session — so no model lookup table is involved.
+  /// for the model actually serving the session — so no model lookup table is involved. Its model
+  /// is recorded separately on `turn_context`, so both latest values are collected before return.
   private static func codex(lines: [Data]) -> SessionContext? {
+    var occupancy: (used: Int, window: Int)?
+    var model: String?
     for line in lines.reversed() {
       guard let record = object(from: line),
-        let payload = record["payload"] as? [String: Any],
-        payload["type"] as? String == "token_count",
+        let payload = record["payload"] as? [String: Any]
+      else { continue }
+
+      if model == nil, record["type"] as? String == "turn_context" {
+        model = payload["model"] as? String
+      }
+      if occupancy == nil, payload["type"] as? String == "token_count",
         let info = payload["info"] as? [String: Any],
         let window = info["model_context_window"] as? Int,
         window > 0,
         let last = info["last_token_usage"] as? [String: Any]
-      else { continue }
-      let used = integer(last["total_tokens"])
-      guard used > 0 else { continue }
-      return SessionContext(usedTokens: used, windowTokens: window)
+      {
+        let used = integer(last["total_tokens"])
+        if used > 0 { occupancy = (used, window) }
+      }
+      if let occupancy, let model {
+        return SessionContext(
+          usedTokens: occupancy.used, windowTokens: occupancy.window, model: model)
+      }
     }
-    return nil
+    guard let occupancy else { return nil }
+    return SessionContext(
+      usedTokens: occupancy.used, windowTokens: occupancy.window, model: model)
   }
 
   private static func object(from line: Data) -> [String: Any]? {

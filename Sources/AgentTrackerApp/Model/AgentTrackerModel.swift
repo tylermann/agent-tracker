@@ -374,7 +374,12 @@ final class AgentTrackerModel: ObservableObject {
     contextSampler.retain(runIDs: visibleIDs)
     var sampled: [String: SessionContext] = [:]
     for run in visible {
-      if let context = contextSampler.sample(run) { sampled[run.runID] = context }
+      if let context = contextSampler.sample(run) {
+        sampled[run.runID] = context
+        if let modelID = context.model, modelID != run.modelID {
+          try? store?.setModel(modelID, forRunID: run.runID)
+        }
+      }
     }
     if sampled != sessionContexts { sessionContexts = sampled }
   }

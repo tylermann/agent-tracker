@@ -51,6 +51,18 @@ final class RunStoreTests: XCTestCase {
     XCTAssertEqual(try store.run(id: "run")?.unreadAttention, false)
   }
 
+  func testModelIsPersistedAndCanBeUpdatedFromContextTelemetry() throws {
+    _ = try store.apply(
+      AgentEvent(
+        runID: "modeled", harness: .codex, kind: .processStarted,
+        modelID: "gpt-5.6-sol"
+      ))
+    XCTAssertEqual(try store.run(id: "modeled")?.modelID, "gpt-5.6-sol")
+
+    try store.setModel("gpt-5.6-terra", forRunID: "modeled")
+    XCTAssertEqual(try store.run(id: "modeled")?.modelID, "gpt-5.6-terra")
+  }
+
   func testSameDirectoryRunsRemainSeparate() throws {
     let one = AgentEvent(
       runID: "one", harness: .claude, kind: .processStarted, ghosttyTerminalID: "t1", cwd: "/tmp")
@@ -250,6 +262,8 @@ final class RunStoreTests: XCTestCase {
     let run = try XCTUnwrap(try store.run(id: "run"))
     XCTAssertEqual(run.status, .waiting)
     XCTAssertNil(run.gitDiffstat)
+    try store.setModel("gpt-5.6-sol", forRunID: "run")
+    XCTAssertEqual(try store.run(id: "run")?.modelID, "gpt-5.6-sol")
   }
 
   func testLegacyHarnessQualifiedOrphansAreMergedOnOpen() throws {

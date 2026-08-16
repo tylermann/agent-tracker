@@ -50,14 +50,29 @@ final class RunReducerTests: XCTestCase {
   func testCursorRunIgnoresCompatibilityHarnessMetadataAndStatus() {
     var subject = makeRun(.needsAttention, harness: .cursor)
     subject.workingDirectory = "/project"
-    RunReducer.reduce(
-      event(.activity, harness: .claude, at: base.addingTimeInterval(1), cwd: "/tmp/.claude"),
-      into: &subject)
+    var compatibility = event(
+      .activity, harness: .claude, at: base.addingTimeInterval(1), cwd: "/tmp/.claude")
+    compatibility.modelID = "claude-fable-5"
+    RunReducer.reduce(compatibility, into: &subject)
     XCTAssertEqual(subject.harness, .cursor)
     XCTAssertEqual(subject.workingDirectory, "/project")
+    XCTAssertNil(subject.modelID)
     XCTAssertEqual(subject.status, .needsAttention)
     // Timestamps and session metadata still advance from compatibility events.
     XCTAssertEqual(subject.lastEventAt, base.addingTimeInterval(1))
+  }
+
+  func testLatestAuthoritativeEventUpdatesModel() {
+    var subject = makeRun(harness: .codex)
+    var first = event(.processStarted, harness: .codex)
+    first.modelID = "gpt-5.6-sol"
+    RunReducer.reduce(first, into: &subject)
+    XCTAssertEqual(subject.modelID, "gpt-5.6-sol")
+
+    var switched = event(.activity, harness: .codex, at: base.addingTimeInterval(1))
+    switched.modelID = "gpt-5.6-terra"
+    RunReducer.reduce(switched, into: &subject)
+    XCTAssertEqual(subject.modelID, "gpt-5.6-terra")
   }
 
   func testWorkingClockStartsOnceAndSurvivesToolActivity() {

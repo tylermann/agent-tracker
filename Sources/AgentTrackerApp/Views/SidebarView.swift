@@ -340,6 +340,7 @@ struct SidebarView: View {
 private struct ProviderLabel: View {
   let harness: Harness
   let font: Font
+  var title: String? = nil
 
   var body: some View {
     HStack(spacing: 5) {
@@ -348,7 +349,7 @@ private struct ProviderLabel: View {
         .interpolation(.high)
         .frame(width: 17, height: 17)
         .accessibilityHidden(true)
-      Text(harness.displayName)
+      Text(title ?? harness.displayName)
         .font(font)
     }
   }
@@ -377,6 +378,10 @@ private struct RunRow: View {
     run.ghosttyTerminalID == nil && run.status != .ended && run.status != .unavailable
   }
   private var isFinished: Bool { run.status == .ended || run.status == .unavailable }
+  private var modelLabel: String? {
+    let modelID = model.sessionContexts[run.runID]?.model ?? run.modelID
+    return ModelIdentity.displayName(for: modelID)
+  }
   private var hasFooterContent: Bool {
     run.branch?.isEmpty == false || run.gitDiffstat?.hasChanges == true
       || run.ghosttyTerminalID == nil || isFinished
@@ -388,7 +393,11 @@ private struct RunRow: View {
     } label: {
       VStack(alignment: .leading, spacing: 3) {
         HStack {
-          ProviderLabel(harness: run.harness, font: SidebarTypography.subheadline.weight(.bold))
+          ProviderLabel(
+            harness: run.harness,
+            font: SidebarTypography.subheadline.weight(.bold),
+            title: modelLabel
+          )
           Text(run.status.displayName)
             .font(SidebarTypography.caption)
             .foregroundStyle(.secondary)

@@ -31,7 +31,8 @@ extension RunStore {
         exit_code INTEGER,
         -- Kept last so a fresh database matches the column order an ALTER-migrated one ends up with.
         working_since REAL,
-        last_turn_duration REAL
+        last_turn_duration REAL,
+        model_id TEXT
     );
     CREATE INDEX IF NOT EXISTS runs_status ON runs(status, last_event_at DESC);
     CREATE INDEX IF NOT EXISTS runs_recent ON runs(last_event_at DESC) WHERE ended_at IS NOT NULL;
@@ -61,6 +62,17 @@ extension RunStore {
       }
       if !columns.contains("last_turn_duration") {
         try database.execute("ALTER TABLE runs ADD COLUMN last_turn_duration REAL")
+      }
+    }
+  }
+
+  /// Model identity was added after run persistence. Existing rows remain unknown until a hook,
+  /// wrapper event, or context sample supplies the model.
+  func migrateRunModelColumn() throws {
+    try withLock {
+      let columns = try tableColumns("runs")
+      if !columns.contains("model_id") {
+        try database.execute("ALTER TABLE runs ADD COLUMN model_id TEXT")
       }
     }
   }
@@ -139,6 +151,7 @@ extension RunStore {
     merged.branch = metadataOrder.compactMap(\.branch).first
     merged.gitDiffstat = metadataOrder.compactMap(\.gitDiffstat).first
     merged.promptPreview = metadataOrder.compactMap(\.promptPreview).first
+    merged.modelID = metadataOrder.compactMap(\.modelID).first
 
     for run in candidates where run.runID != canonicalID {
       try database.update(

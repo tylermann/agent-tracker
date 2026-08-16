@@ -8,7 +8,7 @@ enum RunRowCodec {
   static let columns =
     "run_id, harness, harness_session_id, terminal_id, executable, pid, "
     + "project_root, cwd, branch, git_insertions, git_deletions, prompt_preview, status, unread, "
-    + "started_at, last_event_at, ended_at, exit_code, working_since, last_turn_duration"
+    + "started_at, last_event_at, ended_at, exit_code, working_since, last_turn_duration, model_id"
 
   /// Shared ORDER BY clause matching the sidebar's visible sections. Within a section, a run's
   /// position is based on its immutable start time rather than its activity time, so routine
@@ -27,7 +27,7 @@ enum RunRowCodec {
     """
 
   static let upsertSQL = """
-    INSERT INTO runs(\(columns)) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO runs(\(columns)) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(run_id) DO UPDATE SET
         harness=excluded.harness, harness_session_id=excluded.harness_session_id,
         terminal_id=excluded.terminal_id, executable=excluded.executable, pid=excluded.pid,
@@ -36,7 +36,8 @@ enum RunRowCodec {
         prompt_preview=excluded.prompt_preview, status=excluded.status, unread=excluded.unread,
         started_at=excluded.started_at, last_event_at=excluded.last_event_at,
         ended_at=excluded.ended_at, exit_code=excluded.exit_code,
-        working_since=excluded.working_since, last_turn_duration=excluded.last_turn_duration
+        working_since=excluded.working_since, last_turn_duration=excluded.last_turn_duration,
+        model_id=excluded.model_id
     """
 
   static func bindings(for run: TrackedRun) -> [SQLiteValue] {
@@ -52,6 +53,7 @@ enum RunRowCodec {
       optional(run.endedAt), optional(run.exitCode),
       optional(run.workingSince),
       run.lastTurnDuration.map { SQLiteValue.double($0) } ?? .null,
+      optional(run.modelID),
     ]
   }
 
@@ -68,6 +70,7 @@ enum RunRowCodec {
       branch: text(statement, 8),
       gitDiffstat: gitDiffstat(statement, files: 9, leftover: 10),
       promptPreview: text(statement, 11),
+      modelID: text(statement, 20),
       status: RunStatus(rawValue: text(statement, 12) ?? "") ?? .unavailable,
       unreadAttention: sqlite3_column_int(statement, 13) != 0,
       startedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 14)),

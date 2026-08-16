@@ -68,6 +68,7 @@ final class SessionContextTests: XCTestCase {
       harness: .codex,
       lines: lines(
         """
+        {"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}
         {"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":1000},"model_context_window":258400}}}
         {"type":"response_item","payload":{"type":"message"}}
         {"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":42713},"model_context_window":258400}}}
@@ -75,6 +76,7 @@ final class SessionContextTests: XCTestCase {
 
     XCTAssertEqual(context?.usedTokens, 42_713)
     XCTAssertEqual(context?.windowTokens, 258_400)
+    XCTAssertEqual(context?.model, "gpt-5.6-sol")
   }
 
   func testCodexSkipsTokenCountEventsWithoutUsage() throws {

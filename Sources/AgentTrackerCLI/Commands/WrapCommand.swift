@@ -16,6 +16,7 @@ enum WrapCommand: Command {
       throw CLIError.missing("-- <executable> [arguments]")
     }
     let executable = childArguments[0]
+    let modelID = ModelIdentity.commandLineModel(arguments: Array(childArguments.dropFirst()))
     let runID = UUID().uuidString
     let terminalID = try GhosttyAutomation.focusedTerminalID()
     let cwd = FileManager.default.currentDirectoryPath
@@ -29,6 +30,7 @@ enum WrapCommand: Command {
     environment["AGENT_TRACKER_TERMINAL_ID"] = terminalID
     environment["AGENT_TRACKER_HARNESS"] = harness.rawValue
     environment["AGENT_TRACKER_CHILD_PID"] = String(wrapperPID)
+    if let modelID { environment["AGENT_TRACKER_MODEL_ID"] = modelID }
 
     // The child must join this wrapper's foreground process group (see
     // ForegroundProcessLauncher); the wrapper itself then ignores the terminal's interrupt
@@ -48,7 +50,8 @@ enum WrapCommand: Command {
         ghosttyTerminalID: terminalID,
         processID: wrapperPID,
         cwd: cwd,
-        executable: executable
+        executable: executable,
+        modelID: modelID
       ))
     let status = try ForegroundProcessLauncher.wait(for: childPID)
     try? inbox.enqueue(
@@ -60,6 +63,7 @@ enum WrapCommand: Command {
         processID: wrapperPID,
         cwd: cwd,
         executable: executable,
+        modelID: modelID,
         exitCode: status
       ))
     exit(status)

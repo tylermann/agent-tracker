@@ -23,6 +23,26 @@ final class EventMapperTests: XCTestCase {
     XCTAssertEqual(event.promptPreview, "Fix the login flow")
   }
 
+  func testModelComesFromHookPayloadThenWrapperEnvironment() throws {
+    let payloadModel = try XCTUnwrap(
+      EventMapper.map(
+        harness: .cursor,
+        eventName: "sessionStart",
+        payloadData: Data(#"{"model":{"display_name":"Grok 4.6"}}"#.utf8),
+        environment: ["AGENT_TRACKER_MODEL_ID": "composer-2.5"]
+      ))
+    XCTAssertEqual(payloadModel.modelID, "Grok 4.6")
+
+    let wrapperModel = try XCTUnwrap(
+      EventMapper.map(
+        harness: .codex,
+        eventName: "SessionStart",
+        payloadData: Data("{}".utf8),
+        environment: ["AGENT_TRACKER_MODEL_ID": "gpt-5.6-sol"]
+      ))
+    XCTAssertEqual(wrapperModel.modelID, "gpt-5.6-sol")
+  }
+
   func testClaudePermissionNotificationNeedsAttention() throws {
     let payload = Data(#"{"session_id":"claude-1","notification_type":"permission_prompt"}"#.utf8)
     let event = try XCTUnwrap(
