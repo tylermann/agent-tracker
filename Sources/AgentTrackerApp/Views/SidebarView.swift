@@ -437,7 +437,7 @@ private struct RunRow: View {
 
   var body: some View {
     Button {
-      model.focus(run)
+      model.activate(run)
     } label: {
       VStack(alignment: .leading, spacing: 3) {
         HStack {

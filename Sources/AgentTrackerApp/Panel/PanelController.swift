@@ -114,8 +114,9 @@ final class PanelController: NSObject, NSWindowDelegate {
   }
 
   /// Brings the panel forward and hands it the keyboard so arrows move the highlight and Return
-  /// focuses the highlighted run. Invoked from the global hot key, so the frontmost app is usually
-  /// Ghostty and this app has to activate itself to receive key events at all.
+  /// activates the highlighted run (focus a live terminal, or resume a Recent session). Invoked
+  /// from the global hot key, so the frontmost app is usually Ghostty and this app has to activate
+  /// itself to receive key events at all.
   func focusForKeyboardNavigation() {
     show()
     if let frontmost = NSWorkspace.shared.frontmostApplication,
@@ -156,7 +157,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     case kVK_LeftArrow:
       model.collapseSelection()
     case kVK_Return, kVK_ANSI_KeypadEnter:
-      // `focus` activates Ghostty itself, so there is no previous app left to restore.
+      // Both focus and resume activate Ghostty, so there is no previous app left to restore.
       if model.activateSelection() { endKeyboardNavigation(reactivatingPreviousApp: false) }
     case kVK_Escape:
       endKeyboardNavigation(reactivatingPreviousApp: true)

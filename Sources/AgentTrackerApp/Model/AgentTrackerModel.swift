@@ -194,15 +194,26 @@ final class AgentTrackerModel: ObservableObject {
     expandedRunIDs.remove(selectedRunID)
   }
 
-  /// Focuses the highlighted run, exactly as clicking its row does. Returns `false` when nothing is
-  /// selected, so the caller can leave keyboard mode running.
+  /// Activates the highlighted run, exactly as clicking its row does. Returns `false` when nothing
+  /// is selected, so the caller can leave keyboard mode running.
   @discardableResult
   func activateSelection() -> Bool {
     guard let selectedRunID, let run = runs.first(where: { $0.runID == selectedRunID }) else {
       return false
     }
-    focus(run)
+    activate(run)
     return true
+  }
+
+  /// Primary row action: resume a finished session in a new terminal, or focus a live run's
+  /// Ghostty surface. Recent rows keep a stored terminal ID after that shell is gone, so focusing
+  /// them is not useful.
+  func activate(_ run: TrackedRun) {
+    if ResumeCommand.isAvailable(for: run) {
+      resume(run)
+    } else {
+      focus(run)
+    }
   }
 
   func start() {
