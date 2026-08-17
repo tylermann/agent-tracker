@@ -111,11 +111,69 @@ enum CursorProvider {
   }
 
   static func usageRequest(for credential: UsageCredential) -> URLRequest {
+    connectRequest(
+      path: "GetCurrentPeriodUsage", credential: credential, body: Data("{}".utf8))
+  }
+
+  /// Per-request usage events power the token history chart: Cursor writes no token counts to
+  /// local files, so the same dashboard service the meter polls is asked for its usage-event feed.
+  /// `startMs`/`endMs` are epoch milliseconds, sent as strings per Connect's int64 JSON encoding.
+  static func usageEventsRequest(
+    for credential: UsageCredential, startMs: Int64, endMs: Int64, page: Int, pageSize: Int = 200
+  ) -> URLRequest {
+    let body: [String: Any] = [
+      "teamId": 0,
+      "startDate": String(startMs),
+      "endDate": String(endMs),
+      "page": page,
+      "pageSize": pageSize,
+    ]
+    let encoded = (try? JSONSerialization.data(withJSONObject: body)) ?? Data("{}".utf8)
+    return connectRequest(
+      path: "GetFilteredUsageEvents", credential: credential, body: encoded)
+  }
+
+  static func parseUsageEvents(_ data: Data) throws -> (events: [CursorUsageEvent], totalCount: Int)
+  {
+    let root = try UsageParsing.dictionary(data)
+    // The dashboard currently names the list `usageEventsDisplay`; the plain spelling is kept as
+    // a fallback in case the display-oriented alias ever reverts to the proto field name.
+    guard
+      let rawEvents =
+        (root["usageEventsDisplay"] ?? root["usage_events_display"] ?? root["usageEvents"]
+        ?? root["usage_events"]) as? [[String: Any]]
+    else {
+      throw UsageParseError.missingUsage
+    }
+    let events = rawEvents.compactMap { event -> CursorUsageEvent? in
+      guard
+        let timestamp = UsageParsing.date(
+          event["timestamp"] ?? event["createdAt"] ?? event["created_at"])
+      else { return nil }
+      let model = (event["model"] ?? event["modelIntent"] ?? event["model_intent"]) as? String
+      let usage = (event["tokenUsage"] ?? event["token_usage"]) as? [String: Any] ?? [:]
+      let counters = TokenUsageCounters(
+        input: integer(usage["inputTokens"] ?? usage["input_tokens"]),
+        output: integer(usage["outputTokens"] ?? usage["output_tokens"]),
+        cacheRead: integer(usage["cacheReadTokens"] ?? usage["cache_read_tokens"]),
+        cacheWrite: integer(usage["cacheWriteTokens"] ?? usage["cache_write_tokens"])
+      )
+      guard model != nil || !counters.isEmpty else { return nil }
+      return CursorUsageEvent(timestamp: timestamp, model: model, counters: counters)
+    }
+    let totalCount =
+      UsageParsing.number(root["totalUsageEventsCount"] ?? root["total_usage_events_count"])
+      .map { Int($0) } ?? events.count
+    return (events, totalCount)
+  }
+
+  private static func connectRequest(
+    path: String, credential: UsageCredential, body: Data
+  ) -> URLRequest {
     var request = URLRequest(
-      url: URL(
-        string: "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage")!)
+      url: URL(string: "https://api2.cursor.sh/aiserver.v1.DashboardService/\(path)")!)
     request.httpMethod = "POST"
-    request.httpBody = Data("{}".utf8)
+    request.httpBody = body
     request.timeoutInterval = 15
     request.cachePolicy = .reloadIgnoringLocalCacheData
     request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
@@ -123,6 +181,10 @@ enum CursorProvider {
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     request.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
     return request
+  }
+
+  private static func integer(_ value: Any?) -> Int {
+    UsageParsing.number(value).map { Int($0) } ?? 0
   }
 
   /// Reads a single value from Cursor's key/value state database (state.vscdb).

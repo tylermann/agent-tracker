@@ -148,9 +148,49 @@ struct SidebarView: View {
       ForEach(Harness.allCases, id: \.self) { harness in
         usageRow(harness, snapshot: model.usageSnapshots.first { $0.harness == harness })
       }
+      usageHistory
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 9)
+  }
+
+  private var usageHistory: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 6) {
+        Button {
+          model.usageHistoryExpanded.toggle()
+        } label: {
+          HStack(spacing: 6) {
+            Image(systemName: model.usageHistoryExpanded ? "chevron.down" : "chevron.right")
+              .font(SidebarTypography.caption.weight(.semibold))
+              .frame(width: 10)
+            Text("History")
+              .font(SidebarTypography.caption2.weight(.semibold))
+              .foregroundStyle(.secondary)
+          }
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Usage history")
+        .accessibilityValue(model.usageHistoryExpanded ? "Expanded" : "Collapsed")
+        .accessibilityHint("Shows or hides the token usage chart")
+        Spacer(minLength: 0)
+        if model.usageHistoryExpanded {
+          Picker("Granularity", selection: $model.usageHistoryGranularity) {
+            Text("Day").tag(TokenUsageGranularity.day)
+            Text("Week").tag(TokenUsageGranularity.week)
+          }
+          .pickerStyle(.segmented)
+          .controlSize(.mini)
+          .labelsHidden()
+          .fixedSize()
+        }
+      }
+      if model.usageHistoryExpanded {
+        TokenUsageChartView(model: model)
+      }
+    }
+    .padding(.top, 2)
   }
 
   @ViewBuilder

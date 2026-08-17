@@ -75,6 +75,12 @@ credentials are read once per app launch and retained only in memory, so backgro
 repeatedly access Keychain. Automatic polls do not show Keychain dialogs; use the sidebar refresh
 button to explicitly authorize access when needed.
 
+The usage section also includes a collapsed History chart of daily and weekly token totals, stacked
+per model. Claude and Codex totals come from scanning their transcript files locally — only per-day
+counters are stored, never transcript text — while Cursor totals come from its dashboard
+usage-events endpoint using the same credential the meter polls. The chart follows the usage-meters
+toggle, so turning meters off stops both the scanning and the network requests.
+
 The integration installer creates timestamped backups before changing existing configuration. It adds one marked block to `~/.zshrc`, writes a managed `~/.config/agent-tracker/shell.zsh`, and merges marked hook commands into the harness settings. Existing Codex `notify` configuration is not touched. For Cursor, it installs a local status-line callback when that slot is unused; an existing custom status line is preserved, with turn-end hook data used as a less precise fallback.
 
 ## CLI

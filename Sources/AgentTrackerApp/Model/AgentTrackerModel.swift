@@ -21,6 +21,22 @@ final class AgentTrackerModel: ObservableObject {
       configureUsagePolling()
     }
   }
+  /// Aggregated per-day token usage for the history chart, refreshed by the same gate as the
+  /// usage meters.
+  @Published private(set) var tokenUsageRows: [TokenUsageRow] = []
+  @Published var usageHistoryExpanded: Bool {
+    didSet {
+      UserDefaults.standard.set(usageHistoryExpanded, forKey: PreferenceKeys.usageHistoryExpanded)
+      // Opening the chart is the moment fresh bars matter; restart the loop so it scans now.
+      if usageHistoryExpanded, isStarted, usageMetersEnabled { startTokenUsagePolling() }
+    }
+  }
+  @Published var usageHistoryGranularity: TokenUsageGranularity {
+    didSet {
+      UserDefaults.standard.set(
+        usageHistoryGranularity.rawValue, forKey: PreferenceKeys.usageHistoryGranularity)
+    }
+  }
   @Published var isDetached: Bool {
     didSet { UserDefaults.standard.set(isDetached, forKey: PreferenceKeys.panelDetached) }
   }
@@ -54,6 +70,8 @@ final class AgentTrackerModel: ObservableObject {
   private var timer: Timer?
   private var usageTask: Task<Void, Never>?
   private var lastGoodUsage: [Harness: ProviderUsageSnapshot] = [:]
+  private let tokenUsageCoordinator = TokenUsageHistoryCoordinator()
+  private var tokenUsageTask: Task<Void, Never>?
   private var distributedObserver: NSObjectProtocol?
   private var didReconcile = false
   private var isStarted = false
@@ -66,6 +84,10 @@ final class AgentTrackerModel: ObservableObject {
   init() {
     isDetached = UserDefaults.standard.bool(forKey: PreferenceKeys.panelDetached)
     usageMetersEnabled = UserDefaults.standard.bool(forKey: PreferenceKeys.usageMetersEnabled)
+    usageHistoryExpanded = UserDefaults.standard.bool(forKey: PreferenceKeys.usageHistoryExpanded)
+    usageHistoryGranularity =
+      UserDefaults.standard.string(forKey: PreferenceKeys.usageHistoryGranularity)
+      .flatMap(TokenUsageGranularity.init(rawValue:)) ?? .week
     do {
       inbox = try EventInbox()
       store = try RunStore()
@@ -204,6 +226,8 @@ final class AgentTrackerModel: ObservableObject {
     timer?.invalidate()
     usageTask?.cancel()
     usageTask = nil
+    tokenUsageTask?.cancel()
+    tokenUsageTask = nil
     if let distributedObserver {
       DistributedNotificationCenter.default().removeObserver(distributedObserver)
     }
@@ -399,11 +423,15 @@ final class AgentTrackerModel: ObservableObject {
     guard isStarted else { return }
     if usageMetersEnabled {
       startUsagePolling()
+      startTokenUsagePolling()
     } else {
       usageTask?.cancel()
       usageTask = nil
+      tokenUsageTask?.cancel()
+      tokenUsageTask = nil
       usageSnapshots = []
       lastGoodUsage = [:]
+      tokenUsageRows = []
       Task { await UsageFetcher.clearCredentialCache() }
     }
   }
@@ -429,5 +457,26 @@ final class AgentTrackerModel: ObservableObject {
 
   private func acceptUsage(_ results: [ProviderUsageSnapshot]) {
     usageSnapshots = UsageStalenessFilter.merge(results: results, lastGood: &lastGoodUsage)
+  }
+
+  private func startTokenUsagePolling() {
+    tokenUsageTask?.cancel()
+    guard let store else { return }
+    tokenUsageTask = Task { [weak self, tokenUsageCoordinator] in
+      while !Task.isCancelled {
+        let rows = await tokenUsageCoordinator.runCycle(store: store)
+        guard !Task.isCancelled else { return }
+        if let rows { self?.acceptTokenUsage(rows) }
+        do {
+          try await Task.sleep(for: .seconds(300))
+        } catch {
+          return
+        }
+      }
+    }
+  }
+
+  private func acceptTokenUsage(_ rows: [TokenUsageRow]) {
+    if rows != tokenUsageRows { tokenUsageRows = rows }
   }
 }

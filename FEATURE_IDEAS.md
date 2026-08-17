@@ -47,12 +47,28 @@ Sessions are launched with specific models (via aliases like `fable`, `opus`,
   active and Recent rows, while usage meters stay grouped under provider names.
 - Stored model per session also enables attributing usage-meter burn to specific models later.
 
-## 5. Personal attention-latency stats
+## 5. Token usage history chart — implemented
 
-A small stats view answering "is this app actually saving me time":
+A daily/weekly view of total token usage as a stacked bar chart, one color per
+model (falling back to the harness name when the model is unknown), with colors
+grouped into families per provider so Claude/Codex/Cursor remain distinguishable
+at a glance.
 
-- Per repo and per model, per week: agent working time vs. time spent blocked
-  waiting on a human.
-- Median response time to permission prompts and feedback requests.
-- Highlights which repositories' agents starve the longest before getting
-  attention.
+- Lives behind the existing usage-meters section at the bottom of the panel:
+  collapsed by default, expanded with a disclosure control; toggle between
+  per-day and per-week bars.
+- Data sources: Claude Code transcripts record per-message `usage`
+  (input/output/cache tokens) in `~/.claude/projects/**/*.jsonl`; Codex rollout
+  files record running `total_token_usage` in `~/.codex/sessions/**/*.jsonl`.
+  Cursor writes no token counts to any local file for CLI sessions (transcripts,
+  chat stores, and the IDE state database were all checked), but its dashboard
+  API exposes per-request usage events with a full token breakdown
+  (input/output/cache-read/cache-write per model) — same
+  `aiserver.v1.DashboardService` host and bearer credential the usage meters
+  already use, so Cursor bars come from polling that endpoint instead.
+- Aggregate into small per-day, per-model counters in SQLite; the transcript
+  files are scanned in place and never stored, keeping the "no transcripts"
+  guarantee.
+- Count output plus fresh input tokens, showing cache reads separately or not
+  at all — cached input dominates raw totals (a recent Codex session was 13M
+  input tokens of which 12.9M were cache hits) and would swamp the chart.

@@ -4,6 +4,8 @@ import Foundation
 /// a raw string in one place silently forks the preference.
 enum PreferenceKeys {
   static let usageMetersEnabled = "usageMetersEnabled"
+  static let usageHistoryExpanded = "usageHistoryExpanded"
+  static let usageHistoryGranularity = "usageHistoryGranularity"
   static let panelDetached = "panelDetached"
   static let notifyNeedsAttention = "notifyNeedsAttention"
   static let notifyWaiting = "notifyWaiting"

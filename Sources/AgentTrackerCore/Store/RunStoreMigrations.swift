@@ -36,6 +36,23 @@ extension RunStore {
     );
     CREATE INDEX IF NOT EXISTS runs_status ON runs(status, last_event_at DESC);
     CREATE INDEX IF NOT EXISTS runs_recent ON runs(last_event_at DESC) WHERE ended_at IS NOT NULL;
+    CREATE TABLE IF NOT EXISTS token_usage_daily(
+        day TEXT NOT NULL,
+        harness TEXT NOT NULL,
+        model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(day, harness, model)
+    );
+    CREATE TABLE IF NOT EXISTS token_usage_scan_state(
+        path TEXT PRIMARY KEY,
+        byte_offset INTEGER NOT NULL DEFAULT 0,
+        file_size INTEGER NOT NULL DEFAULT 0,
+        modified_at REAL NOT NULL DEFAULT 0,
+        model TEXT
+    );
     """
 
   /// Existing databases were created with `CREATE TABLE IF NOT EXISTS`, so new columns have to

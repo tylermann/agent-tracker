@@ -5,6 +5,7 @@ import Foundation
 enum SQLiteValue {
   case text(String)
   case int(Int32)
+  case int64(Int)
   case double(Double)
   case null
 }
@@ -61,6 +62,7 @@ final class SQLiteDatabase {
       switch value {
       case .text(let text): sqlite3_bind_text(statement, index, text, -1, Self.transient)
       case .int(let number): sqlite3_bind_int(statement, index, number)
+      case .int64(let number): sqlite3_bind_int64(statement, index, sqlite3_int64(number))
       case .double(let number): sqlite3_bind_double(statement, index, number)
       case .null: sqlite3_bind_null(statement, index)
       }

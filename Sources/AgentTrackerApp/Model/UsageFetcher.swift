@@ -37,11 +37,13 @@ enum UsageFetcher {
   private enum FetchError: LocalizedError {
     case rejected(Int)
     case invalidResponse
+    case unexpectedBody(String)
 
     var errorDescription: String? {
       switch self {
       case .rejected(let status): "Usage request failed (HTTP \(status))."
       case .invalidResponse: "The usage service returned an invalid response."
+      case .unexpectedBody(let snippet): "Unexpected usage-events response: \(snippet)"
       }
     }
   }
@@ -59,6 +61,39 @@ enum UsageFetcher {
 
   static func clearCredentialCache() async {
     await credentialCache.removeAll()
+  }
+
+  /// Fetches Cursor's per-request usage events for the token history chart, paging until the
+  /// window is exhausted. Shares the meters' credential cache, so an auth failure in either path
+  /// signs the provider out once for both.
+  static func fetchCursorUsageEvents(startMs: Int64, endMs: Int64) async throws
+    -> [CursorUsageEvent]
+  {
+    let spec = ProviderRegistry.spec(for: .cursor)
+    do {
+      let credential = try await credentialCache.credential(for: spec, reload: false)
+      let pageSize = 200
+      var events: [CursorUsageEvent] = []
+      for page in 1...25 {
+        let request = UsageRequestBuilder.cursorUsageEvents(
+          credential: credential, startMs: startMs, endMs: endMs, page: page, pageSize: pageSize)
+        let data = try await responseData(for: request)
+        let parsed: (events: [CursorUsageEvent], totalCount: Int)
+        do {
+          parsed = try UsageResponseParser.cursorUsageEvents(data)
+        } catch {
+          // The endpoint is undocumented; when its shape changes, the local log needs to show
+          // what actually came back, not just that parsing failed.
+          throw FetchError.unexpectedBody(String(decoding: data.prefix(300), as: UTF8.self))
+        }
+        events.append(contentsOf: parsed.events)
+        if parsed.events.count < pageSize || events.count >= parsed.totalCount { break }
+      }
+      return events
+    } catch FetchError.rejected(let status) where status == 401 || status == 403 {
+      await credentialCache.remove(.cursor)
+      throw UsageCredentialError.loggedOut
+    }
   }
 
   private static func fetch(

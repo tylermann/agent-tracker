@@ -44,6 +44,7 @@ public enum EventMapper {
     case "pretooluse":
       let tool = string(in: payload, keys: ["tool_name", "toolName"])?.lowercased() ?? ""
       if tool.contains("askquestion")
+        || tool.contains("askuserquestion")
         || tool.contains("requestuserinput")
         || tool.contains("request_user_input")
         || (harness == .cursor && cursorToolRequiresApproval(tool))

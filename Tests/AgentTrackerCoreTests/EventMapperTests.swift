@@ -93,6 +93,18 @@ final class EventMapperTests: XCTestCase {
     XCTAssertEqual(event.kind, .attentionRequired)
   }
 
+  func testClaudeAskUserQuestionNeedsAttention() throws {
+    let payload = Data(#"{"session_id":"claude-2","tool_name":"AskUserQuestion"}"#.utf8)
+    let event = try XCTUnwrap(
+      EventMapper.map(
+        harness: .claude,
+        eventName: "PreToolUse",
+        payloadData: payload,
+        environment: ["AGENT_TRACKER_RUN_ID": "run-4"]
+      ))
+    XCTAssertEqual(event.kind, .attentionRequired)
+  }
+
   func testCursorWebSearchNeedsAttentionAndUsesWorkspaceRoot() throws {
     let payload = Data(
       #"{"conversation_id":"cursor-1","workspace_roots":["/tmp/project"],"tool_name":"WebSearch"}"#

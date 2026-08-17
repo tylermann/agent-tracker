@@ -73,6 +73,11 @@ struct SettingsView: View {
         )
         .font(.caption)
         .foregroundStyle(.secondary)
+        Text(
+          "The usage history chart additionally scans Claude and Codex transcript files on this Mac and stores only per-day token totals per model — never transcript text — and reads Cursor's per-request usage events from the same dashboard endpoint the meter already polls."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
       }
 
       Section {
