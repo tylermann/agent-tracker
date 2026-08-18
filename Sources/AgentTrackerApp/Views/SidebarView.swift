@@ -139,11 +139,20 @@ struct SidebarView: View {
         Button {
           model.refreshUsage()
         } label: {
-          Image(systemName: "arrow.clockwise")
-            .font(SidebarTypography.caption2)
+          if model.isRefreshingUsage {
+            ProgressView()
+              .controlSize(.mini)
+          } else {
+            Image(systemName: "arrow.clockwise")
+              .font(SidebarTypography.caption2)
+          }
         }
+        .frame(width: 20, height: 20)
+        .contentShape(Rectangle())
         .buttonStyle(.plain)
+        .disabled(model.isRefreshingUsage)
         .help("Refresh usage")
+        .accessibilityLabel("Refresh usage")
       }
       ForEach(Harness.allCases, id: \.self) { harness in
         usageRow(harness, snapshot: model.usageSnapshots.first { $0.harness == harness })
@@ -211,7 +220,8 @@ struct SidebarView: View {
               usageLine(
                 primary,
                 overage: primary.usedPercent >= 100 ? snapshot.overage : nil,
-                isStale: snapshot.availability == .stale
+                isStale: snapshot.availability == .stale,
+                staleMessage: snapshot.message
               )
             }
             if harness == .claude, let modelSpecific = snapshot.modelSpecific {
@@ -233,7 +243,8 @@ struct SidebarView: View {
     _ window: UsageWindow,
     overage: UsageOverage? = nil,
     isStale: Bool,
-    compact: Bool = false
+    compact: Bool = false,
+    staleMessage: String? = nil
   ) -> some View {
     let display = RunPresentation.meterDisplay(window: window, overage: overage)
     return VStack(spacing: 2) {
@@ -259,7 +270,15 @@ struct SidebarView: View {
       }
       .frame(height: compact ? 3 : 4)
       .opacity(isStale ? 0.65 : 1)
-      if let resetsAt = window.resetsAt {
+      // Tooltips on this non-activating panel are easy to miss; when a refresh fails,
+      // show the reason under the meter instead of keeping a frozen last-good reading.
+      if isStale, let staleMessage, !staleMessage.isEmpty {
+        Text(staleMessage)
+          .font(SidebarTypography.resetLabel)
+          .foregroundStyle(.tertiary)
+          .lineLimit(1)
+          .frame(maxWidth: .infinity, alignment: .trailing)
+      } else if let resetsAt = window.resetsAt {
         Text(RunPresentation.resetLabel(resetsAt))
           .font(SidebarTypography.resetLabel)
           .foregroundStyle(.tertiary)

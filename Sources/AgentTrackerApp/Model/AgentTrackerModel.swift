@@ -12,6 +12,7 @@ final class AgentTrackerModel: ObservableObject {
   @Published private(set) var recentTotalCount = 0
   @Published var errorMessage: String?
   @Published private(set) var usageSnapshots: [ProviderUsageSnapshot] = []
+  @Published private(set) var isRefreshingUsage = false
   /// How full each visible run's context window is, keyed by run ID. Sampled from the harness
   /// transcripts on every refresh; runs whose harness records no token counts are simply absent.
   @Published private(set) var sessionContexts: [String: SessionContext] = [:]
@@ -239,6 +240,7 @@ final class AgentTrackerModel: ObservableObject {
     usageTask = nil
     tokenUsageTask?.cancel()
     tokenUsageTask = nil
+    isRefreshingUsage = false
     if let distributedObserver {
       DistributedNotificationCenter.default().removeObserver(distributedObserver)
     }
@@ -247,6 +249,13 @@ final class AgentTrackerModel: ObservableObject {
   func refreshUsage() {
     guard usageMetersEnabled else { return }
     startUsagePolling(forceCredentialReload: true)
+  }
+
+  /// Immediate poll without a Keychain prompt. Used after wake, when the 3-minute sleep
+  /// would otherwise leave a stale meter on screen until the next tick.
+  func pollUsageNow() {
+    guard usageMetersEnabled, isStarted else { return }
+    startUsagePolling(forceCredentialReload: false)
   }
 
   func refresh() {
@@ -440,6 +449,7 @@ final class AgentTrackerModel: ObservableObject {
       usageTask = nil
       tokenUsageTask?.cancel()
       tokenUsageTask = nil
+      isRefreshingUsage = false
       usageSnapshots = []
       lastGoodUsage = [:]
       tokenUsageRows = []
@@ -452,11 +462,14 @@ final class AgentTrackerModel: ObservableObject {
     usageTask = Task { [weak self] in
       var shouldReloadCredentials = forceCredentialReload
       while !Task.isCancelled {
+        self?.isRefreshingUsage = true
         let results = await UsageFetcher.fetchAll(
           forceCredentialReload: shouldReloadCredentials)
         shouldReloadCredentials = false
+        guard let self else { return }
+        self.isRefreshingUsage = false
         guard !Task.isCancelled else { return }
-        self?.acceptUsage(results)
+        self.acceptUsage(results)
         do {
           try await Task.sleep(for: .seconds(180))
         } catch {

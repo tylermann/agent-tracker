@@ -52,24 +52,26 @@ enum ClaudeProvider {
 
   static func readCredential(home: URL, allowKeychainPrompt: Bool) throws -> UsageCredential {
     let file = home.appendingPathComponent(".claude/.credentials.json")
-    if let root = CredentialReading.json(at: file),
-      let oauth = root["claudeAiOauth"] as? [String: Any],
-      let token = CredentialReading.nonempty(oauth["accessToken"])
-    {
-      return UsageCredential(accessToken: token)
+    let fileMaterial = ClaudeOAuthMaterial.parse(CredentialReading.json(at: file))
+    // On macOS the live token lives in the keychain; Claude Code often leaves a leftover
+    // ~/.claude/.credentials.json behind. Use the file only while its expiresAt is still in
+    // the future so a stale file cannot mask a rotated keychain token. A file with no expiry
+    // is treated as usable so tests (and older files) never fall through to the real keychain.
+    if let fileMaterial, fileMaterial.isUnexpired() {
+      return fileMaterial.asCredential
     }
     #if canImport(Security)
       for service in ["Claude Code-credentials", "claude-code-credentials"] {
         if let data = CredentialReading.keychainPassword(
           service: service, allowPrompt: allowKeychainPrompt, securityToolFallback: true),
           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let oauth = root["claudeAiOauth"] as? [String: Any],
-          let token = CredentialReading.nonempty(oauth["accessToken"])
+          let keychain = ClaudeOAuthMaterial.parse(root)
         {
-          return UsageCredential(accessToken: token)
+          return keychain.asCredential
         }
       }
     #endif
+    if let fileMaterial { return fileMaterial.asCredential }
     throw CredentialReading.loggedOutError(allowKeychainPrompt: allowKeychainPrompt)
   }
 
@@ -102,5 +104,39 @@ enum ClaudeProvider {
       if let result = UsageParsing.window(root[key], label: label) { return result }
     }
     return nil
+  }
+}
+
+/// Claude Code OAuth payload shared by `~/.claude/.credentials.json` and the macOS keychain item.
+struct ClaudeOAuthMaterial: Equatable, Sendable {
+  var accessToken: String
+  var expiresAt: Date?
+
+  var asCredential: UsageCredential { UsageCredential(accessToken: accessToken) }
+
+  func isUnexpired(now: Date = Date()) -> Bool {
+    guard let expiresAt else { return true }
+    return expiresAt > now
+  }
+
+  static func parse(_ root: [String: Any]?) -> ClaudeOAuthMaterial? {
+    guard let oauth = root?["claudeAiOauth"] as? [String: Any],
+      let token = CredentialReading.nonempty(oauth["accessToken"])
+    else { return nil }
+    return ClaudeOAuthMaterial(
+      accessToken: token, expiresAt: expiryDate(oauth["expiresAt"] ?? oauth["expires_at"]))
+  }
+
+  /// `expiresAt` is an epoch, usually milliseconds. Unlike usage reset fields, a small number
+  /// means 1970 (already expired), not a delta from now.
+  static func expiryDate(_ value: Any?) -> Date? {
+    if let number = UsageParsing.number(value) {
+      if number > 10_000_000_000 { return Date(timeIntervalSince1970: number / 1_000) }
+      return Date(timeIntervalSince1970: number)
+    }
+    guard let string = value as? String else { return nil }
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return fractional.date(from: string) ?? ISO8601DateFormatter().date(from: string)
   }
 }

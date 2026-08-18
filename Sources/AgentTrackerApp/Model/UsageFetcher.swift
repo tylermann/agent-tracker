@@ -97,7 +97,7 @@ enum UsageFetcher {
   }
 
   private static func fetch(
-    _ spec: ProviderSpec, forceCredentialReload: Bool
+    _ spec: ProviderSpec, forceCredentialReload: Bool, didRetryAuth: Bool = false
   ) async -> ProviderUsageSnapshot {
     let harness = spec.harness
     do {
@@ -109,6 +109,12 @@ enum UsageFetcher {
       return unavailable(harness, availability: .loggedOut, message: "Not logged in")
     } catch FetchError.rejected(let status) where status == 401 || status == 403 {
       await credentialCache.remove(harness)
+      // The in-memory token (or leftover credentials file) is often one rotation behind
+      // Claude Code's keychain item. Re-read once in this cycle so refresh is not a no-op.
+      if !didRetryAuth {
+        return await fetch(
+          spec, forceCredentialReload: forceCredentialReload, didRetryAuth: true)
+      }
       return unavailable(
         harness, availability: .loggedOut,
         message: "Sign in to \(harness.displayName) again")

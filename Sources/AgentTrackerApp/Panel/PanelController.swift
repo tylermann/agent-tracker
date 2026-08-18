@@ -89,7 +89,12 @@ final class PanelController: NSObject, NSWindowDelegate {
       object: nil,
       queue: .main
     ) { [weak self] _ in
-      Task { @MainActor in self?.reanchorAfterDisplayChange() }
+      Task { @MainActor in
+        self?.reanchorAfterDisplayChange()
+        // Give the interface a moment to come back before hitting usage endpoints.
+        try? await Task.sleep(for: .seconds(2))
+        self?.model.pollUsageNow()
+      }
     }
     timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
       Task { @MainActor in

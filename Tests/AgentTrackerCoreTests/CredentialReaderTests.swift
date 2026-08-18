@@ -6,7 +6,8 @@ import XCTest
 /// reader falls through to its keychain lookup: the lookup targets the real login keychain by
 /// service name, so it would read the developer's actual credentials, and the Claude reader's
 /// /usr/bin/security fallback can show an ACL password prompt even with
-/// `allowKeychainPrompt: false`.
+/// `allowKeychainPrompt: false`. Claude files must omit `expiresAt` or set it in the future;
+/// an expired file token is treated as stale and falls through to the keychain.
 final class CredentialReaderTests: XCTestCase {
   private var home: URL!
 
@@ -26,6 +27,14 @@ final class CredentialReaderTests: XCTestCase {
     let credential = try UsageCredentialReader.claude(home: home, allowKeychainPrompt: false)
     XCTAssertEqual(credential.accessToken, "claude-token")
     XCTAssertNil(credential.accountID)
+  }
+
+  func testReadsUnexpiredClaudeCredentialFile() throws {
+    try write(
+      #"{"claudeAiOauth":{"accessToken":"claude-token","expiresAt":4102444800000}}"#,
+      to: ".claude/.credentials.json")
+    let credential = try UsageCredentialReader.claude(home: home, allowKeychainPrompt: false)
+    XCTAssertEqual(credential.accessToken, "claude-token")
   }
 
   func testReadsCodexCredentialFileWithAccountID() throws {
